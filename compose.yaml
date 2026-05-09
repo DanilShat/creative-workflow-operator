@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-creative}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-creative}
+      POSTGRES_DB: ${POSTGRES_DB:-creative_workflow}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-creative} -d ${POSTGRES_DB:-creative_workflow}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    image: creative-workflow-operator:latest
+    env_file:
+      - .env.docker
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-creative}:${POSTGRES_PASSWORD:-creative}@postgres:5432/${POSTGRES_DB:-creative_workflow}
+      ARTIFACT_ROOT: /data/artifacts
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - operator_artifacts:/data/artifacts
+    command: ["python", "-m", "creative_workflow.server.cli", "db", "migrate"]
+    restart: "no"
+
+  api:
+    image: creative-workflow-operator:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.docker
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-creative}:${POSTGRES_PASSWORD:-creative}@postgres:5432/${POSTGRES_DB:-creative_workflow}
+      ARTIFACT_ROOT: /data/artifacts
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - operator_artifacts:/data/artifacts
+    command: ["python", "-m", "creative_workflow.server.cli", "dev", "--host", "0.0.0.0", "--port", "8000"]
+
+  ui:
+    image: creative-workflow-operator:latest
+    env_file:
+      - .env.docker
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-creative}:${POSTGRES_PASSWORD:-creative}@postgres:5432/${POSTGRES_DB:-creative_workflow}
+      ARTIFACT_ROOT: /data/artifacts
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      API_INTERNAL_BASE_URL: http://api:8000
+    ports:
+      - "${UI_PORT:-8501}:8501"
+    depends_on:
+      api:
+        condition: service_started
+    volumes:
+      - operator_artifacts:/data/artifacts
+    command: ["python", "-m", "creative_workflow.server.cli", "ui", "--port", "8501"]
+
+volumes:
+  postgres_data:
+  operator_artifacts:

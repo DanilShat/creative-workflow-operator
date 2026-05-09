@@ -1,0 +1,32 @@
+# Local secrets and machine-specific configuration
+.env
+.env.*
+!.env.server.example
+!.env.docker.example
+
+# Generated runtime packages can contain worker tokens.
+dist/
+
+# Runtime output
+runtime_logs/
+*.log
+
+# Python build/test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local editor/OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
