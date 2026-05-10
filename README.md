@@ -1,28 +1,72 @@
-# Creative Workflow Operator
+# Creative Workflow — Operator
 
-Operator-side backend and UI for the creative workflow automation system.
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Status](https://img.shields.io/badge/status-pet%20project-orange)
 
-This repo owns:
+> **Status:** pet project, actively developed, not production. Gate A — the Gemini → Freepik browser flow — is the first slice; Photoshop and After Effects bridges are scaffolded but not live yet.
 
-- FastAPI control-plane API
-- Streamlit operator UI
-- PostgreSQL schema and migrations
-- worker token issuance and worker protocol endpoints
-- artifact storage metadata and Docker deployment
-- local Ollama-compatible LLM orchestration
+**Creative Workflow** is a small automation system for design agencies that work through web tools — Gemini, Freepik, Kling — instead of paid APIs. You describe a brief once; the system queues up every variation, runs the browser clicks for you across your existing accounts, and drops the results into a single dashboard you can review. One "operator" laptop runs the brain and the UI. Each designer's laptop runs a "worker" that drives their own browser sessions, so your subscriptions, cookies, and account history stay where they belong. It's a pet project, not a SaaS — built to remove the most repetitive parts of a real creative workflow without replacing the designer's judgement.
 
-The designer laptop worker lives in a separate repo:
+This repo is the **operator side** — the dashboard, the queue, the database, the brain.
+
+## Three repos, one project
 
 ```text
-https://github.com/DanilShat/creative-workflow-worker
+creative-workflow-docs-library   ── specs, runbooks, prompts, skills (the design library)
+creative-workflow-operator       ── runs once, on the operator laptop  ──┐
+                                                                          │  jobs, heartbeats, artifacts
+creative-workflow-worker         ── runs on each designer's laptop    ──┘
 ```
+
+Start with this repo if you want to set up the dashboard. Designers joining an existing operator should start with [`creative-workflow-worker`](https://github.com/DanilShat/creative-workflow-worker). The docs library is read-only reference material — you don't need it to run anything.
+
+## What it does
+
+- Turns one written brief into a queue of variants — color, layout, language, format — without you re-typing prompts.
+- Shows every job, every artifact, and every retry on a single Streamlit dashboard. No more hunting through 14 browser tabs.
+- Routes work to whichever designer laptop is online, using a small local LLM to plan the steps.
+- Keeps every output, prompt, and decision in one Postgres database you can search, export, or audit later.
+
+## Who this is for
+
+A small creative agency or solo designer who already pays for Gemini, Freepik, or Kling subscriptions and finds themselves doing the same prompt-and-download dance dozens of times per project.
+
+**Not for:** anyone looking for a managed SaaS, a Photoshop plugin, or an API-first generation pipeline. This system is self-hosted and runs on Windows laptops you already own.
+
+## Screenshots
+
+Placeholder slots — replace with real captures once demo evidence is ready.
+
+| | |
+| --- | --- |
+| ![Streamlit dashboard](docs/screenshots/streamlit_dashboard.png) | ![Job detail](docs/screenshots/job_detail.png) |
+| Operator dashboard — every job, every designer, one screen. | Job detail — prompts, artifacts, retries, decisions. |
+
+![Artifact browser](docs/screenshots/artifact_browser.png)
+
+## Architecture
+
+End-to-end data flow (operator ↔ worker ↔ creative tools), exported from **graphify**:
+
+![Architecture](docs/diagrams/architecture.svg)
+
+A narrative walkthrough of the same flow lives in [`docs/demo_walkthrough.md`](docs/demo_walkthrough.md).
+
+## Prerequisites
+
+- Windows 10/11
+- Docker Desktop
+- PowerShell 5+
+- Optional: Ollama on the operator laptop for local LLM checks
+
+Clone anywhere. Paths in this README are relative to the repo root.
 
 ## Quick Start
 
-Install Docker Desktop, start it, then run:
+Install Docker Desktop, start it, then from the repo root:
 
 ```powershell
-cd D:\design_agent_pet_project\creative_workflow_operator
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\docker_operator_up.ps1 -Build
 ```
 
@@ -32,7 +76,7 @@ Open:
 http://127.0.0.1:8501
 ```
 
-For a designer laptop on the LAN:
+For a designer laptop on the LAN (find your IPv4 with `ipconfig | findstr IPv4`):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\docker_operator_up.ps1 `
@@ -55,7 +99,12 @@ python -m pytest tests -q
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\docker_operator_status.ps1
 ```
 
+The repo standardizes on `pyproject.toml`; there is no separate `requirements.txt`.
+
 ## Runtime Notes
 
-Real secrets stay in local `.env.*` files and are ignored by git. Commit only
-`.env.*.example` files.
+Real secrets stay in local `.env.*` files and are ignored by git. Commit only `.env.*.example` files.
+
+## What's next
+
+Gate B brings After Effects motion-design jobs into the same queue. Gate C adds a lightweight reviewer flow so a creative director can approve or reject variants from their phone. Issues and ideas welcome — this is a personal project, so PRs are reviewed case-by-case.

@@ -35,14 +35,14 @@ docker compose version
 For local-only testing:
 
 ```powershell
-cd D:\design_agent_pet_project\creative_workflow_operator
+cd <repo-root>
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\docker_operator_up.ps1 -Build
 ```
 
 For a real designer laptop on the LAN, use the operator laptop LAN IP:
 
 ```powershell
-cd D:\design_agent_pet_project\creative_workflow_operator
+cd <repo-root>
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\docker_operator_up.ps1 `
   -ServerPublicBaseUrl http://192.168.1.124:8000 `
   -Build
