@@ -90,6 +90,35 @@ def test_gate_a_creates_gemini_then_freepik_then_human_review(db_session, server
     assert db_session.get(Worker, "designer-laptop-01").active_job_id is None
 
 
+def test_gate_a_variant_count_fans_out_gemini_jobs(db_session, server_settings):
+    workflow = WorkflowService(db_session, server_settings)
+    task = workflow.create_task("Hero variants", "Create multiple square hero options.", "static_image", "operator")
+    db_session.add(
+        Asset(
+            asset_id="asset_ref_1",
+            task_id=task.task_id,
+            asset_class=AssetClass.REFERENCE.value,
+            retention_class=RetentionClass.KEEP.value,
+            original_filename="ref.png",
+            stored_filename="asset_ref_1.png",
+            relative_path="tasks/task_1/reference/asset_ref_1.png",
+            content_type="image/png",
+            size_bytes=1,
+            sha256="a" * 64,
+            source_service=SourceService.MANUAL.value,
+        )
+    )
+    db_session.commit()
+
+    run, jobs = workflow.start_gate_a(task.task_id, None, variant_count=4)
+
+    assert run.task_id == task.task_id
+    assert len(jobs) == 4
+    assert {job.action_name for job in jobs} == {"gemini_build_prompt_from_brief_and_refs"}
+    assert {job.required_capability for job in jobs} == {"browser.gemini"}
+    assert len({job.job_id for job in jobs}) == 4
+
+
 def test_complete_rejects_missing_artifact_ids(db_session, server_settings):
     workflow = WorkflowService(db_session, server_settings)
     task = workflow.create_task("Hero", "Create a square hero image.", "static_image", "operator")

@@ -21,6 +21,7 @@ class TaskCreateResponse(BaseModel):
 class StartGateARequest(BaseModel):
     task_id: str
     operator_note: str | None = None
+    variant_count: int = Field(1, ge=1, le=20)
 
 
 class StartGateAResponse(BaseModel):

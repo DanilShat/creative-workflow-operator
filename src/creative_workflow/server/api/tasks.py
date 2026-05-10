@@ -76,7 +76,9 @@ def start_gate_a(
     settings: ServerSettings = Depends(get_settings),
 ):
     try:
-        run, jobs = WorkflowService(db, settings).start_gate_a(task_id, payload.operator_note)
+        run, jobs = WorkflowService(db, settings).start_gate_a(
+            task_id, payload.operator_note, variant_count=payload.variant_count
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail={"code": "conflict", "message": str(exc)}) from exc
     return StartGateAResponse(

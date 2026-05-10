@@ -43,7 +43,12 @@ class WorkflowService:
         self.db.refresh(task)
         return task
 
-    def start_gate_a(self, task_id: str, operator_note: str | None) -> tuple[Run, list[Job]]:
+    def start_gate_a(
+        self,
+        task_id: str,
+        operator_note: str | None,
+        variant_count: int = 1,
+    ) -> tuple[Run, list[Job]]:
         task = self._task(task_id)
         references = self._reference_assets(task_id)
         if not references:
@@ -57,14 +62,19 @@ class WorkflowService:
         self.db.flush()
         normalized = self.llm.normalize_brief(task.brief_text)
         route = self.llm.route_for_gate_a(normalized)
-        job = self._make_gemini_job(task, run, references, operator_note, route.reason)
+        jobs = [
+            self._make_gemini_job(task, run, references, operator_note, route.reason)
+            for _ in range(variant_count)
+        ]
         task.workflow_state = WorkflowState.WAITING_WORKER.value
-        self._event(task_id, run.run_id, job.job_id, "gate_a_started", {
+        self._event(task_id, run.run_id, jobs[0].job_id, "gate_a_started", {
             "normalized_brief": normalized.model_dump(),
             "route": route.model_dump(),
+            "variant_count": variant_count,
+            "created_job_ids": [j.job_id for j in jobs],
         })
         self.db.commit()
-        return run, [job]
+        return run, jobs
 
     def handle_job_complete(self, job: Job, outputs: dict, artifact_ids: list[str]) -> WorkflowState:
         task = self._task(job.task_id)
