@@ -58,6 +58,36 @@ class LocalLLMService:
             reason="Operator rejected the previous result and supplied repair guidance.",
         )
 
+    def chat_text(self, message: str, context: dict | None = None) -> str:
+        """Answer routine chat on the operator laptop through Ollama.
+
+        This path stays server-side by design: Ollama is part of operator
+        orchestration, while designer workers only run browser/DCC work and
+        subscription CLIs such as Claude Code or Codex.
+        """
+
+        context_json = json.dumps(context or {}, ensure_ascii=True)
+        prompt = (
+            "You are the Creative Workflow operator assistant. "
+            "Answer concisely and operationally for a designer using the app.\n"
+            f"Context JSON: {context_json}\n"
+            f"Message: {message}"
+        )
+        try:
+            with self.client_factory() as client:
+                response = client.post(
+                    f"{self.settings.ollama_base_url.rstrip('/')}/api/generate",
+                    json={"model": self.settings.ollama_model, "prompt": prompt, "stream": False},
+                )
+                response.raise_for_status()
+                payload = response.json()
+            text = str(payload.get("response") or "").strip()
+            if text:
+                return text
+        except (httpx.HTTPError, TypeError, ValueError):
+            pass
+        return "Operator Ollama is unavailable. Start Ollama on the operator laptop and try again."
+
     def _json_call(self, prompt: str, model: type[T]) -> T | None:
         for attempt in range(2):
             request_prompt = prompt if attempt == 0 else f"Fix the previous response. JSON only. {prompt}"

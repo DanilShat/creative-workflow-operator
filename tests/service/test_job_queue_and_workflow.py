@@ -127,6 +127,26 @@ def test_agent_chat_creates_claimable_job_and_stores_reply_event(db_session, ser
     assert events[0].payload_json["outputs"]["agent_chat"]["text"] == "Profile needs manual login."
 
 
+def test_agent_chat_uses_operator_ollama_without_worker_for_routine_request(db_session, server_settings):
+    workflow = WorkflowService(db_session, server_settings)
+    workflow.llm.chat_text = lambda message, context: "Operator-local answer"
+
+    task, run, job, outputs = workflow.create_agent_chat(
+        message="Summarize this task status.",
+        preferred_agent=None,
+    )
+
+    events = db_session.scalars(
+        select(WorkflowEvent).where(WorkflowEvent.task_id == task.task_id, WorkflowEvent.event_type == "agent_chat_completed")
+    ).all()
+    assert job is None
+    assert task.workflow_state == WorkflowState.AGENT_REPLIED.value
+    assert run.status == "completed"
+    assert outputs["agent_chat"]["routed_to"] == "local_ollama"
+    assert outputs["agent_chat"]["text"] == "Operator-local answer"
+    assert events[0].job_id is None
+
+
 def test_gate_a_variant_count_fans_out_gemini_jobs(db_session, server_settings):
     workflow = WorkflowService(db_session, server_settings)
     task = workflow.create_task("Hero variants", "Create multiple square hero options.", "static_image", "operator")

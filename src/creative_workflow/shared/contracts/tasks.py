@@ -40,8 +40,9 @@ class AgentChatCreateRequest(BaseModel):
 class AgentChatCreateResponse(BaseModel):
     task_id: str
     run_id: str
-    job_id: str
+    job_id: str | None = None
     workflow_state: str
+    reply: dict[str, Any] | None = None
 
 
 class TaskSummaryResponse(BaseModel):

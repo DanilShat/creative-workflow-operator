@@ -131,6 +131,45 @@ class WorkflowService:
         self.db.refresh(job)
         return task, run, job
 
+    def create_agent_chat(
+        self,
+        message: str,
+        task_id: str | None = None,
+        preferred_agent: str | None = None,
+    ) -> tuple[Task, Run, Job | None, dict]:
+        """Dispatch chat to operator Ollama or a worker-side subscription CLI."""
+
+        if self._should_use_operator_ollama(message, preferred_agent):
+            task = self._task(task_id) if task_id else self.create_task(
+                title=self._title_from_message(message),
+                brief_text=message,
+                requested_output_type="agent_chat",
+                created_by="designer_chat",
+            )
+            attempt = self._next_attempt(task.task_id)
+            run = Run(run_id=new_id("run"), task_id=task.task_id, attempt_number=attempt, status="completed", completed_at=utc_now())
+            self.db.add(run)
+            outputs = {
+                "agent_chat": {
+                    "agent": "local_ollama",
+                    "routed_to": "local_ollama",
+                    "text": self.llm.chat_text(
+                        message,
+                        {"task_title": task.title, "requested_output_type": task.requested_output_type},
+                    ),
+                    "raw_output": None,
+                }
+            }
+            task.workflow_state = WorkflowState.AGENT_REPLIED.value
+            self._event(task.task_id, run.run_id, None, "agent_chat_completed", {"outputs": outputs})
+            self.db.commit()
+            self.db.refresh(task)
+            self.db.refresh(run)
+            return task, run, None, outputs
+
+        task, run, job = self.create_agent_chat_job(message, task_id, preferred_agent)
+        return task, run, job, {}
+
     def handle_job_complete(self, job: Job, outputs: dict, artifact_ids: list[str]) -> WorkflowState:
         task = self._task(job.task_id)
         if job.action_name == AGENT_CHAT_ACTION:
@@ -303,6 +342,29 @@ class WorkflowService:
     def _title_from_message(self, message: str) -> str:
         first = next((line.strip() for line in message.splitlines() if line.strip()), "Agent chat")
         return first[:80]
+
+    def _should_use_operator_ollama(self, message: str, preferred_agent: str | None) -> bool:
+        if preferred_agent == "local_ollama":
+            return True
+        if preferred_agent in {"claude_cli", "codex_cli"}:
+            return False
+        text = message.lower()
+        escalation_markers = {
+            "browser",
+            "click",
+            "open page",
+            "inspect",
+            "freepik",
+            "gemini",
+            "photoshop",
+            "after effects",
+            "make variants",
+            "design",
+            "compose",
+            "creative",
+            "layout",
+        }
+        return not any(marker in text for marker in escalation_markers)
 
     def _event(self, task_id: str, run_id: str | None, job_id: str | None, event_type: str, payload: dict) -> None:
         self.db.add(

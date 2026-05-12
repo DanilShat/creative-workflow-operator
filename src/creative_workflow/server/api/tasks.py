@@ -53,7 +53,7 @@ def create_agent_chat(
     settings: ServerSettings = Depends(get_settings),
 ):
     try:
-        task, run, job = WorkflowService(db, settings).create_agent_chat_job(
+        task, run, job, outputs = WorkflowService(db, settings).create_agent_chat(
             message=payload.message,
             task_id=payload.task_id,
             preferred_agent=payload.preferred_agent,
@@ -63,8 +63,9 @@ def create_agent_chat(
     return AgentChatCreateResponse(
         task_id=task.task_id,
         run_id=run.run_id,
-        job_id=job.job_id,
+        job_id=job.job_id if job else None,
         workflow_state=task.workflow_state,
+        reply=outputs.get("agent_chat") if outputs else None,
     )
 
 

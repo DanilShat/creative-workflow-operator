@@ -4,7 +4,7 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-pet%20project-orange)
 
-> **Status:** pet project, actively developed, not production. Gate A is the Gemini to Freepik browser slice. Gate B adds chat-style agent routing to worker-local Ollama, Claude Code CLI, and Codex CLI, then desktop bridge contracts for Photoshop and After Effects.
+> **Status:** pet project, actively developed, not production. Gate A is the Gemini to Freepik browser slice. Gate B adds chat-style agent routing to operator-local Ollama and worker-local Claude Code CLI/Codex CLI, then desktop bridge contracts for Photoshop and After Effects.
 
 **Creative Workflow** is a small automation system for design agencies that work through web tools — Gemini, Freepik, Kling — instead of paid APIs. You describe a brief once; the system queues up every variation, runs the browser clicks for you across your existing accounts, and drops the results into a single dashboard you can review. One "operator" laptop runs the brain and the UI. Each designer's laptop runs a "worker" that drives their own browser sessions, so your subscriptions, cookies, and account history stay where they belong. It's a pet project, not a SaaS — built to remove the most repetitive parts of a real creative workflow without replacing the designer's judgement.
 
@@ -29,7 +29,7 @@ with [`AGENT_MANIFEST.md`](AGENT_MANIFEST.md).
 - Turns one written brief into a queue of variants — color, layout, language, format — without you re-typing prompts.
 - Provides a Streamlit chat console so a designer can ask the workflow agent for help while jobs run on the worker.
 - Shows every job, every artifact, and every retry on a single Streamlit dashboard. No more hunting through 14 browser tabs.
-- Routes work to whichever designer laptop is online, using local Ollama for routine work and worker-local Claude Code or Codex CLI for escalations.
+- Routes routine chat to Ollama on the operator laptop and escalated browser/creative work to worker-local Claude Code or Codex CLI.
 - Keeps every output, prompt, and decision in one Postgres database you can search, export, or audit later.
 
 ## Who this is for
@@ -63,7 +63,7 @@ A narrative walkthrough of the same flow lives in [`docs/demo_walkthrough.md`](d
 - Docker Desktop
 - PowerShell 5+
 - Optional: Ollama on the operator laptop for local LLM checks
-- Optional on worker laptops: Claude Code CLI and Codex CLI logged into subscription accounts for agent escalation
+- Optional on worker laptops: Claude Code CLI and Codex CLI logged into subscription accounts for agent escalation. Ollama stays on the operator laptop.
 
 Clone anywhere. Paths in this README are relative to the repo root.
 

@@ -274,16 +274,22 @@ if prompt:
         else:
             created = _create_agent_chat(prompt, st.session_state.task_id or None, preferred_agent)
             st.session_state.task_id = created["task_id"]
-            st.session_state.tracked_jobs[created["job_id"]] = {"task_id": created["task_id"], "displayed": False}
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": (
-                        f"Sent to worker as `{created['job_id']}`. "
-                        "Use Refresh status if the answer does not appear automatically."
-                    ),
-                }
-            )
+            if created.get("reply"):
+                reply = created["reply"]
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": f"**{reply.get('routed_to', 'agent')}**\n\n{reply.get('text', '')}"}
+                )
+            else:
+                st.session_state.tracked_jobs[created["job_id"]] = {"task_id": created["task_id"], "displayed": False}
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": (
+                            f"Sent to worker as `{created['job_id']}`. "
+                            "Use Refresh status if the answer does not appear automatically."
+                        ),
+                    }
+                )
     except httpx.HTTPError as exc:
         st.session_state.messages.append({"role": "assistant", "content": f"Server request failed: `{exc}`"})
     st.rerun()

@@ -86,10 +86,12 @@ needing direct database access.
   planned operator work.
 
 ### 2026-05-12 - Codex
-- Context: Added chat-style agent jobs so Streamlit can queue work to local
-  Ollama, Claude Code CLI, and Codex CLI through the worker protocol.
-- Decision: Treat Claude/Codex as subscription CLIs logged in on the designer
-  laptop, not as server-side API integrations.
+- Context: Added chat-style agent dispatch so Streamlit can answer routine
+  chat through operator-local Ollama and queue escalations to Claude Code CLI
+  or Codex CLI through the worker protocol.
+- Decision: Keep Ollama on the operator laptop. Treat Claude/Codex as
+  subscription CLIs logged in on the designer laptop, not as server-side API
+  integrations.
 - Files changed: task API/contracts, workflow service, Streamlit UI, README.
 - Tests run: targeted operator API/service/contract tests.
 - Open questions: exact non-interactive CLI flags may need adjustment per

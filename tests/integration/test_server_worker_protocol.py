@@ -86,6 +86,34 @@ def test_agent_chat_api_creates_claimable_worker_job(tmp_path, server_settings):
         assert job.inputs_json["preferred_agent"] == "codex_cli"
 
 
+def test_agent_chat_api_returns_operator_ollama_reply_without_worker_job(tmp_path, server_settings):
+    server_settings = server_settings.__class__(
+        **{**server_settings.__dict__, "database_url": f"sqlite:///{tmp_path / 'agent_chat_local.db'}"}
+    )
+    engine = make_engine(server_settings.database_url)
+    Base.metadata.create_all(engine)
+    factory = make_session_factory(server_settings.database_url)
+    app = create_app(server_settings)
+
+    def override_db():
+        with factory() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_db
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/tasks/agent-chat",
+        json={"message": "Summarize current task status."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["workflow_state"] == WorkflowState.AGENT_REPLIED.value
+    assert payload["job_id"] is None
+    assert payload["reply"]["routed_to"] == "local_ollama"
+
+
 def test_heartbeat_does_not_clear_server_owned_active_job(tmp_path, server_settings):
     server_settings = server_settings.__class__(
         **{**server_settings.__dict__, "database_url": f"sqlite:///{tmp_path / 'heartbeat.db'}"}
