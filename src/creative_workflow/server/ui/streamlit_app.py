@@ -1,14 +1,17 @@
-"""Chat-first Streamlit operator UI for Gate A.
+"""Chat-first Streamlit operator UI.
 
-The operator/designer talks to the server as a task agent. The UI still calls
-FastAPI for durable task state, artifact storage, and review decisions; it does
-not bypass the worker protocol or launch browsers directly.
+The UI behaves like a small agent console: the designer types into one chat box,
+the operator server stores state, and the worker executes local Ollama/Claude
+Code/Codex CLI or browser jobs through the same polling protocol.
 """
+
+from __future__ import annotations
 
 from pathlib import Path
 import hashlib
 import json
 import os
+from typing import Any
 
 import httpx
 import streamlit as st
@@ -23,9 +26,8 @@ def _sha256(data: bytes) -> str:
 
 
 def _client() -> httpx.Client:
-    # Streamlit runs server-side Python. In Docker it must talk to the API
-    # service over the compose network, while browser-visible asset URLs must
-    # still use the public operator URL.
+    # In Docker, Streamlit talks to the API service over the compose network.
+    # Browser-visible artifact URLs still use PUBLIC_API_BASE.
     return httpx.Client(base_url=INTERNAL_API_BASE, timeout=120)
 
 
@@ -34,7 +36,7 @@ def _title_from_brief(brief: str) -> str:
     return first[:80]
 
 
-def _create_and_start_task(brief: str, reference, output_type: str) -> dict:
+def _create_and_start_task(brief: str, reference, output_type: str) -> dict[str, Any]:
     with _client() as client:
         task_resp = client.post(
             "/api/v1/tasks",
@@ -71,7 +73,17 @@ def _create_and_start_task(brief: str, reference, output_type: str) -> dict:
         return start_resp.json()
 
 
-def _task_snapshot(task_id: str) -> tuple[dict | None, dict | None]:
+def _create_agent_chat(message: str, task_id: str | None, preferred_agent: str | None) -> dict[str, Any]:
+    with _client() as client:
+        response = client.post(
+            "/api/v1/tasks/agent-chat",
+            json={"message": message, "task_id": task_id or None, "preferred_agent": preferred_agent},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def _task_snapshot(task_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     with _client() as client:
         summary_resp = client.get(f"/api/v1/tasks/{task_id}")
         if summary_resp.status_code != 200:
@@ -81,7 +93,7 @@ def _task_snapshot(task_id: str) -> tuple[dict | None, dict | None]:
         return summary_resp.json(), history_resp.json()
 
 
-def _latest_job_line(history: dict) -> str:
+def _latest_job_line(history: dict[str, Any]) -> str:
     jobs = history.get("jobs", [])
     if not jobs:
         return "No worker job has been created yet."
@@ -92,41 +104,87 @@ def _latest_job_line(history: dict) -> str:
     return f"Latest job: `{action}` is `{state}` on `{worker}`."
 
 
+def _agent_completion(history: dict[str, Any], job_id: str) -> str | None:
+    for event in history.get("workflow_events", []):
+        if event.get("job_id") != job_id:
+            continue
+        if event.get("event_type") == "agent_chat_completed":
+            output = (event.get("payload_json") or {}).get("outputs", {}).get("agent_chat", {})
+            agent = output.get("routed_to") or output.get("agent") or "agent"
+            text = output.get("text") or ""
+            return f"**{agent}**\n\n{text}"
+        if event.get("event_type") == "job_failed":
+            payload = event.get("payload_json") or {}
+            return f"Worker failed: `{payload.get('failure_type')}`\n\n{payload.get('message') or ''}"
+    return None
+
+
+def _sync_tracked_jobs() -> None:
+    for job_id, item in list(st.session_state.tracked_jobs.items()):
+        if item.get("displayed"):
+            continue
+        _summary, history = _task_snapshot(item["task_id"])
+        if not history:
+            continue
+        reply = _agent_completion(history, job_id)
+        if reply:
+            st.session_state.messages.append({"role": "assistant", "content": reply})
+            item["displayed"] = True
+
+
 st.set_page_config(page_title="Creative Workflow", layout="wide")
 st.markdown(
     """
     <style>
-    .block-container { padding-top: 1.5rem; max-width: 980px; }
-    [data-testid="stSidebar"] { min-width: 310px; }
+    .block-container { padding-top: 1.2rem; max-width: 1120px; }
+    [data-testid="stSidebar"] { min-width: 320px; }
+    .cw-shell { border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 16px; background: #fbfbfa; }
+    .cw-title { font-size: 1.35rem; font-weight: 650; margin-bottom: 0.15rem; }
+    .cw-subtle { color: #666; font-size: 0.9rem; }
     .stChatMessage { border-radius: 8px; }
+    div[data-testid="stMetric"] { border: 1px solid #eee; border-radius: 8px; padding: 8px 10px; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.title("Creative Workflow")
-st.caption(f"Server: {PUBLIC_API_BASE}")
-
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant",
-            "content": "Upload a reference, then paste the brief here. I will create the task and send it to the worker.",
+            "content": (
+                "Send a brief, ask for analysis, or attach a reference and request an image run. "
+                "I will route routine work to Ollama and escalation work to Claude Code or Codex CLI on the worker."
+            ),
         }
     ]
 if "task_id" not in st.session_state:
     st.session_state.task_id = ""
-if "last_submitted_brief" not in st.session_state:
-    st.session_state.last_submitted_brief = ""
+if "tracked_jobs" not in st.session_state:
+    st.session_state.tracked_jobs = {}
+
+_sync_tracked_jobs()
+
+st.markdown(
+    f"""
+    <div class="cw-shell">
+      <div class="cw-title">Creative Workflow Agent</div>
+      <div class="cw-subtle">Operator API: {PUBLIC_API_BASE}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 with st.sidebar:
-    st.subheader("Run Setup")
-    output_type = st.radio("Output", ["static_image", "video"], horizontal=True)
-    reference = st.file_uploader("Reference", type=["png", "jpg", "jpeg", "webp"])
+    st.subheader("Session")
+    mode = st.radio("Mode", ["Agent chat", "Generate image"], horizontal=False)
+    preferred = st.selectbox("Preferred agent", ["Auto", "Ollama", "Claude Code", "Codex CLI"])
+    output_type = st.radio("Output type", ["static_image", "video"], horizontal=True)
+    reference = st.file_uploader("Optional reference", type=["png", "jpg", "jpeg", "webp"])
     if reference:
-        st.image(reference, caption=reference.name, use_column_width=True)
-    st.session_state.task_id = st.text_input("Task ID", st.session_state.task_id)
-    if st.button("Refresh", use_container_width=True):
+        st.image(reference, caption=reference.name, use_container_width=True)
+    st.session_state.task_id = st.text_input("Current task", st.session_state.task_id)
+    if st.button("Refresh status", use_container_width=True):
         st.rerun()
 
 for message in st.session_state.messages:
@@ -136,11 +194,12 @@ for message in st.session_state.messages:
 if st.session_state.task_id:
     summary, history = _task_snapshot(st.session_state.task_id)
     if summary and history:
+        col_a, col_b, col_c = st.columns(3)
+        col_a.metric("Task", summary["task_id"])
+        col_b.metric("State", summary["workflow_state"])
+        col_c.metric("Generated", len(summary["latest_generated_asset_ids"]))
         with st.chat_message("assistant"):
-            st.markdown(
-                f"Task `{summary['task_id']}` is `{summary['workflow_state']}`. "
-                f"{_latest_job_line(history)}"
-            )
+            st.markdown(_latest_job_line(history))
             for asset_id in summary["latest_generated_asset_ids"]:
                 st.image(f"{PUBLIC_API_BASE}/api/v1/assets/{asset_id}/download", caption=asset_id)
 
@@ -161,7 +220,7 @@ if st.session_state.task_id:
                         },
                     ).raise_for_status()
                     st.rerun()
-                if col_b.button("Reject And Retry", use_container_width=True, disabled=not reason):
+                if col_b.button("Reject and retry", use_container_width=True, disabled=not reason):
                     review = client.post(
                         f"/api/v1/tasks/{summary['task_id']}/reviews",
                         json={
@@ -185,29 +244,46 @@ if st.session_state.task_id:
         with st.expander("Task history"):
             st.json(history)
 
-brief = st.chat_input("Paste the brief and press Enter")
-if brief:
-    if brief == st.session_state.last_submitted_brief:
-        st.stop()
-    st.session_state.last_submitted_brief = brief
-    st.session_state.messages.append({"role": "user", "content": brief})
-    if reference is None:
-        st.session_state.messages.append(
-            {"role": "assistant", "content": "Upload a reference image first, then send the brief again."}
-        )
-        st.rerun()
+prompt = st.chat_input("Message the workflow agent")
+if prompt:
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    preferred_agent = {
+        "Auto": None,
+        "Ollama": "local_ollama",
+        "Claude Code": "claude_cli",
+        "Codex CLI": "codex_cli",
+    }[preferred]
     try:
-        started = _create_and_start_task(brief, reference, output_type)
-        st.session_state.task_id = started["task_id"]
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": (
-                    f"Started `{started['task_id']}`. "
-                    f"Run `{started['run_id']}` created jobs: `{', '.join(started['created_job_ids'])}`."
-                ),
-            }
-        )
+        if mode == "Generate image":
+            if reference is None:
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": "Attach a reference image, then send the image brief again."}
+                )
+            else:
+                started = _create_and_start_task(prompt, reference, output_type)
+                st.session_state.task_id = started["task_id"]
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": (
+                            f"Started `{started['task_id']}`. "
+                            f"Run `{started['run_id']}` created jobs: `{', '.join(started['created_job_ids'])}`."
+                        ),
+                    }
+                )
+        else:
+            created = _create_agent_chat(prompt, st.session_state.task_id or None, preferred_agent)
+            st.session_state.task_id = created["task_id"]
+            st.session_state.tracked_jobs[created["job_id"]] = {"task_id": created["task_id"], "displayed": False}
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": (
+                        f"Sent to worker as `{created['job_id']}`. "
+                        "Use Refresh status if the answer does not appear automatically."
+                    ),
+                }
+            )
     except httpx.HTTPError as exc:
         st.session_state.messages.append({"role": "assistant", "content": f"Server request failed: `{exc}`"})
     st.rerun()

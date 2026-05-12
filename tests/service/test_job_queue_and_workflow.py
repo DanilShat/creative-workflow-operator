@@ -2,11 +2,11 @@ import pytest
 from datetime import timedelta
 from sqlalchemy import select
 
-from creative_workflow.server.db.models import Asset, Job, Worker
+from creative_workflow.server.db.models import Asset, Job, Worker, WorkflowEvent
 from creative_workflow.server.services.job_queue import JobQueueService, QueueConflict
 from creative_workflow.server.services.workflow import WorkflowService
 from creative_workflow.shared.contracts.jobs import JobCompleteRequest, JobFailRequest
-from creative_workflow.shared.enums import AssetClass, FailureType, JobState, RetentionClass, SourceService, WorkflowState
+from creative_workflow.shared.enums import AssetClass, FailureType, JobState, JobType, RetentionClass, SourceService, WorkflowState
 from creative_workflow.shared.time import iso_now
 from creative_workflow.shared.time import utc_now
 
@@ -88,6 +88,43 @@ def test_gate_a_creates_gemini_then_freepik_then_human_review(db_session, server
     )
     assert state == WorkflowState.WAITING_HUMAN_REVIEW
     assert db_session.get(Worker, "designer-laptop-01").active_job_id is None
+
+
+def test_agent_chat_creates_claimable_job_and_stores_reply_event(db_session, server_settings):
+    workflow = WorkflowService(db_session, server_settings)
+    db_session.add(Worker(worker_id="designer-laptop-01", capabilities=["agent.chat"], status="idle"))
+    db_session.commit()
+
+    task, run, job = workflow.create_agent_chat_job(
+        message="Use Codex browser support to inspect the Freepik profile.",
+        preferred_agent="codex_cli",
+    )
+
+    assert job.job_type == JobType.AGENT_CHAT.value
+    assert job.required_capability == "agent.chat"
+    assert job.inputs_json["preferred_agent"] == "codex_cli"
+
+    queue = JobQueueService(db_session, server_settings)
+    claimed = queue.claim_next("designer-laptop-01", ["agent.chat"], None)
+    assert claimed is not None
+    assert claimed.job_id == job.job_id
+    queue.complete(
+        job.job_id,
+        JobCompleteRequest(
+            worker_id="designer-laptop-01",
+            outputs={"agent_chat": {"routed_to": "codex_cli", "text": "Profile needs manual login."}},
+            completed_at=iso_now(),
+        ),
+    )
+
+    db_session.refresh(task)
+    db_session.refresh(run)
+    events = db_session.scalars(
+        select(WorkflowEvent).where(WorkflowEvent.task_id == task.task_id, WorkflowEvent.event_type == "agent_chat_completed")
+    ).all()
+    assert task.workflow_state == WorkflowState.AGENT_REPLIED.value
+    assert run.status == "completed"
+    assert events[0].payload_json["outputs"]["agent_chat"]["text"] == "Profile needs manual login."
 
 
 def test_gate_a_variant_count_fans_out_gemini_jobs(db_session, server_settings):

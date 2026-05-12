@@ -18,6 +18,8 @@ from creative_workflow.shared.time import utc_now
 
 GEMINI_ACTION = "gemini_build_prompt_from_brief_and_refs"
 FREEPIK_ACTION = "freepik_generate_image_from_prompt"
+AGENT_CHAT_ACTION = "designer_agent_chat"
+AGENT_CHAT_CAPABILITY = "agent.chat"
 GEMINI_PHOTO_GEM_URL = "https://gemini.google.com/gem/5f69a5afc4b5"
 GEMINI_VIDEO_GEM_URL = "https://gemini.google.com/gem/21d5be0eae0a"
 
@@ -76,8 +78,70 @@ class WorkflowService:
         self.db.commit()
         return run, jobs
 
+    def create_agent_chat_job(
+        self,
+        message: str,
+        task_id: str | None = None,
+        preferred_agent: str | None = None,
+    ) -> tuple[Task, Run, Job]:
+        """Create a durable worker job for conversational local-agent help.
+
+        This is separate from Gate A browser generation. It lets the designer
+        use the same worker polling protocol for Ollama, Claude Code CLI, and
+        Codex CLI without exposing subscription credentials to the operator
+        server.
+        """
+
+        task = self._task(task_id) if task_id else self.create_task(
+            title=self._title_from_message(message),
+            brief_text=message,
+            requested_output_type="agent_chat",
+            created_by="designer_chat",
+        )
+        attempt = self._next_attempt(task.task_id)
+        run = Run(run_id=new_id("run"), task_id=task.task_id, attempt_number=attempt, status="running")
+        self.db.add(run)
+        self.db.flush()
+        job = Job(
+            job_id=new_id("job"),
+            task_id=task.task_id,
+            run_id=run.run_id,
+            job_type=JobType.AGENT_CHAT.value,
+            required_capability=AGENT_CHAT_CAPABILITY,
+            action_name=AGENT_CHAT_ACTION,
+            inputs_json={
+                "message": message,
+                "preferred_agent": preferred_agent,
+                "context": {
+                    "task_title": task.title,
+                    "requested_output_type": task.requested_output_type,
+                },
+                "timeout_s": 600,
+            },
+            state=JobState.QUEUED.value,
+            attempt_number=run.attempt_number,
+            retry_policy_json={"max_attempts": 1, "retryable_failure_types": []},
+        )
+        self.db.add(job)
+        task.workflow_state = WorkflowState.WAITING_WORKER.value
+        self._event(task.task_id, run.run_id, job.job_id, "agent_chat_requested", {"preferred_agent": preferred_agent})
+        self.db.commit()
+        self.db.refresh(task)
+        self.db.refresh(run)
+        self.db.refresh(job)
+        return task, run, job
+
     def handle_job_complete(self, job: Job, outputs: dict, artifact_ids: list[str]) -> WorkflowState:
         task = self._task(job.task_id)
+        if job.action_name == AGENT_CHAT_ACTION:
+            run = self.db.get(Run, job.run_id)
+            if run:
+                run.status = "completed"
+                run.completed_at = utc_now()
+            task.workflow_state = WorkflowState.AGENT_REPLIED.value
+            self._event(job.task_id, job.run_id, job.job_id, "agent_chat_completed", {"outputs": outputs})
+            return WorkflowState.AGENT_REPLIED
+
         if job.action_name == GEMINI_ACTION:
             flow = outputs.get("flow_result", {})
             structured = flow.get("structured_output") or outputs.get("structured_output") or {}
@@ -235,6 +299,10 @@ class WorkflowService:
 
     def _gemini_url_for_task(self, task: Task) -> str:
         return GEMINI_VIDEO_GEM_URL if "video" in task.requested_output_type.lower() else GEMINI_PHOTO_GEM_URL
+
+    def _title_from_message(self, message: str) -> str:
+        first = next((line.strip() for line in message.splitlines() if line.strip()), "Agent chat")
+        return first[:80]
 
     def _event(self, task_id: str, run_id: str | None, job_id: str | None, event_type: str, payload: dict) -> None:
         self.db.add(

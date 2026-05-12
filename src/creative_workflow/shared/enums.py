@@ -47,6 +47,7 @@ class JobExecutionState(StrEnum):
 
 class WorkflowState(StrEnum):
     DRAFT = "draft"
+    AGENT_REPLIED = "agent_replied"
     WAITING_WORKER = "waiting_worker"
     RUNNING_WORKER_JOB = "running_worker_job"
     WAITING_HUMAN_REVIEW = "waiting_human_review"
@@ -57,6 +58,7 @@ class WorkflowState(StrEnum):
 
 
 class JobType(StrEnum):
+    AGENT_CHAT = "agent_chat"
     BROWSER_FLOW = "browser_flow"
     PHOTOSHOP_ACTION = "photoshop_action"
     AFTEREFFECTS_ACTION = "aftereffects_action"

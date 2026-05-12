@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from creative_workflow.shared.contracts.assets import AssetUploadMetadata
 from creative_workflow.shared.contracts.jobs import GeminiPromptOutput, JobEnvelope
+from creative_workflow.shared.contracts.tasks import AgentChatCreateRequest
 from creative_workflow.shared.enums import AssetClass, JobType, RetentionClass, SourceService
 
 
@@ -31,6 +32,12 @@ def test_job_envelope_serializes_canonical_browser_job():
         inputs={"brief_text": "Create a product hero."},
     )
     assert job.model_dump(mode="json")["job_type"] == "browser_flow"
+
+
+def test_agent_chat_create_request_accepts_subscription_cli_names():
+    request = AgentChatCreateRequest(message="inspect browser", preferred_agent="codex_cli")
+
+    assert request.model_dump()["preferred_agent"] == "codex_cli"
 
 
 def test_gemini_prompt_output_requires_prompt_text():

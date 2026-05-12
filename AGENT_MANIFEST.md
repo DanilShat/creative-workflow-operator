@@ -25,15 +25,15 @@ operator API endpoints or create typed worker jobs.
 
 ## Planned operator additions
 
-1. Add a `GET /api/v1/tasks/{task_id}/claude-handoff` endpoint.
-2. Add a Streamlit button that copies a Claude handoff packet.
+1. Keep `POST /api/v1/tasks/agent-chat` as the generic chat escalation path.
+2. Add a `GET /api/v1/tasks/{task_id}/agent-handoff` endpoint if a future CLI needs a copyable packet.
 3. Add job types or action names for:
-   - `claude_browser_assisted_generation`
+   - `designer_agent_chat`
    - `photoshop_typed_action`
    - `aftereffects_typed_action`
 4. Add read-side summaries for MCP tools.
 5. Add review-note APIs that preserve who/what submitted the note.
-6. Add audit events for Claude-requested actions.
+6. Add audit events for Claude/Codex-requested actions.
 
 ## Handoff packet shape
 
@@ -59,8 +59,8 @@ needing direct database access.
 - Require worker auth for execution and artifact upload.
 - Store Claude decisions as review notes or requested actions, not raw state
   mutations.
-- Do not add server-side Claude API calls unless an Anthropic API key is
-  explicitly configured.
+- Do not add server-side Claude or Codex API calls for this path. Claude Code
+  and Codex are local subscription CLIs on the designer laptop.
 - Do not mark Photoshop/After Effects live until a real local install executes
   the typed action.
 
@@ -84,3 +84,13 @@ needing direct database access.
 - Tests run: operator pytest suite.
 - Open questions: dedicated Claude handoff endpoint and audit trail remain
   planned operator work.
+
+### 2026-05-12 - Codex
+- Context: Added chat-style agent jobs so Streamlit can queue work to local
+  Ollama, Claude Code CLI, and Codex CLI through the worker protocol.
+- Decision: Treat Claude/Codex as subscription CLIs logged in on the designer
+  laptop, not as server-side API integrations.
+- Files changed: task API/contracts, workflow service, Streamlit UI, README.
+- Tests run: targeted operator API/service/contract tests.
+- Open questions: exact non-interactive CLI flags may need adjustment per
+  installed Claude Code/Codex versions during live laptop validation.

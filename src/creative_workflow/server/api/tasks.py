@@ -16,6 +16,8 @@ from creative_workflow.server.services.workflow import WorkflowService
 from creative_workflow.shared.contracts.assets import ReferenceUploadMetadata, ReferenceUploadResponse
 from creative_workflow.shared.enums import AssetClass, RetentionClass
 from creative_workflow.shared.contracts.tasks import (
+    AgentChatCreateRequest,
+    AgentChatCreateResponse,
     ReviewRequest,
     ReviewResponse,
     RetryRequest,
@@ -42,6 +44,28 @@ def create_task(
         payload.title, payload.brief_text, payload.requested_output_type, payload.created_by
     )
     return TaskCreateResponse(task_id=task.task_id, workflow_state=task.workflow_state, created_at=task.created_at.isoformat())
+
+
+@router.post("/agent-chat", response_model=AgentChatCreateResponse)
+def create_agent_chat(
+    payload: AgentChatCreateRequest,
+    db: Session = Depends(get_db),
+    settings: ServerSettings = Depends(get_settings),
+):
+    try:
+        task, run, job = WorkflowService(db, settings).create_agent_chat_job(
+            message=payload.message,
+            task_id=payload.task_id,
+            preferred_agent=payload.preferred_agent,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"code": "conflict", "message": str(exc)}) from exc
+    return AgentChatCreateResponse(
+        task_id=task.task_id,
+        run_id=run.run_id,
+        job_id=job.job_id,
+        workflow_state=task.workflow_state,
+    )
 
 
 @router.post("/{task_id}/references", response_model=ReferenceUploadResponse)

@@ -55,6 +55,37 @@ def test_worker_register_heartbeat_and_invalid_token_rejected(tmp_path, server_s
         assert db.get(Worker, "designer-laptop-01").last_heartbeat_at is not None
 
 
+def test_agent_chat_api_creates_claimable_worker_job(tmp_path, server_settings):
+    server_settings = server_settings.__class__(
+        **{**server_settings.__dict__, "database_url": f"sqlite:///{tmp_path / 'agent_chat.db'}"}
+    )
+    engine = make_engine(server_settings.database_url)
+    Base.metadata.create_all(engine)
+    factory = make_session_factory(server_settings.database_url)
+    app = create_app(server_settings)
+
+    def override_db():
+        with factory() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_db
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/tasks/agent-chat",
+        json={"message": "Ask Codex to inspect the browser state.", "preferred_agent": "codex_cli"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["workflow_state"] == WorkflowState.WAITING_WORKER.value
+    with factory() as db:
+        job = db.get(Job, payload["job_id"])
+        assert job.required_capability == "agent.chat"
+        assert job.job_type == JobType.AGENT_CHAT.value
+        assert job.inputs_json["preferred_agent"] == "codex_cli"
+
+
 def test_heartbeat_does_not_clear_server_owned_active_job(tmp_path, server_settings):
     server_settings = server_settings.__class__(
         **{**server_settings.__dict__, "database_url": f"sqlite:///{tmp_path / 'heartbeat.db'}"}

@@ -38,6 +38,20 @@ CONTRACT_CLASSES = {
         "JobForWorker",
         "ClaimNextResponse",
     ],
+    "creative_workflow.shared.contracts.tasks": [
+        "TaskCreateRequest",
+        "TaskCreateResponse",
+        "StartGateARequest",
+        "StartGateAResponse",
+        "AgentChatCreateRequest",
+        "AgentChatCreateResponse",
+        "TaskSummaryResponse",
+        "TaskHistoryResponse",
+        "ReviewRequest",
+        "ReviewResponse",
+        "RetryRequest",
+        "RetryResponse",
+    ],
 }
 
 
