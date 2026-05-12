@@ -149,6 +149,7 @@ class WorkflowService:
             attempt = self._next_attempt(task.task_id)
             run = Run(run_id=new_id("run"), task_id=task.task_id, attempt_number=attempt, status="completed", completed_at=utc_now())
             self.db.add(run)
+            self.db.flush()
             outputs = {
                 "agent_chat": {
                     "agent": "local_ollama",

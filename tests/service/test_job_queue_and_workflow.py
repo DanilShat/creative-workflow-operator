@@ -145,6 +145,7 @@ def test_agent_chat_uses_operator_ollama_without_worker_for_routine_request(db_s
     assert outputs["agent_chat"]["routed_to"] == "local_ollama"
     assert outputs["agent_chat"]["text"] == "Operator-local answer"
     assert events[0].job_id is None
+    assert events[0].run_id == run.run_id
 
 
 def test_gate_a_variant_count_fans_out_gemini_jobs(db_session, server_settings):
