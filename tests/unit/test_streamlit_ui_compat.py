@@ -24,3 +24,24 @@ def test_streamlit_image_calls_use_streamlit_135_keyword() -> None:
             bad_calls.append(node.lineno)
 
     assert bad_calls == []
+
+
+def test_reference_uploader_accepts_multiple_files() -> None:
+    source = Path("src/creative_workflow/server/ui/streamlit_app.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    uploader_calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "file_uploader":
+            continue
+        if not isinstance(node.func.value, ast.Name) or node.func.value.id != "st":
+            continue
+        uploader_calls.append(node)
+
+    assert uploader_calls, "expected a Streamlit reference uploader"
+    assert any(
+        any(keyword.arg == "accept_multiple_files" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True for keyword in call.keywords)
+        for call in uploader_calls
+    )

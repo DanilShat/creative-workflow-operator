@@ -11,10 +11,18 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import time
 from typing import Any
 
 import httpx
 import streamlit as st
+
+from creative_workflow.server.ui.view_models import (
+    active_worker_job,
+    format_user_message,
+    progress_lines,
+    reference_summaries,
+)
 
 
 PUBLIC_API_BASE = os.getenv("SERVER_PUBLIC_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -36,7 +44,7 @@ def _title_from_brief(brief: str) -> str:
     return first[:80]
 
 
-def _create_and_start_task(brief: str, reference, output_type: str) -> dict[str, Any]:
+def _create_and_start_task(brief: str, references: list[Any], output_type: str) -> dict[str, Any]:
     with _client() as client:
         task_resp = client.post(
             "/api/v1/tasks",
@@ -50,20 +58,21 @@ def _create_and_start_task(brief: str, reference, output_type: str) -> dict[str,
         task_resp.raise_for_status()
         task = task_resp.json()
 
-        data = reference.getvalue()
-        metadata = {
-            "original_filename": Path(reference.name).name,
-            "content_type": reference.type or "application/octet-stream",
-            "size_bytes": len(data),
-            "sha256": _sha256(data),
-            "source_service": "manual",
-        }
-        ref_resp = client.post(
-            f"/api/v1/tasks/{task['task_id']}/references",
-            files={"file": (reference.name, data, reference.type)},
-            data={"metadata": json.dumps(metadata)},
-        )
-        ref_resp.raise_for_status()
+        for reference in references:
+            data = reference.getvalue()
+            metadata = {
+                "original_filename": Path(reference.name).name,
+                "content_type": reference.type or "application/octet-stream",
+                "size_bytes": len(data),
+                "sha256": _sha256(data),
+                "source_service": "manual",
+            }
+            ref_resp = client.post(
+                f"/api/v1/tasks/{task['task_id']}/references",
+                files={"file": (reference.name, data, reference.type)},
+                data={"metadata": json.dumps(metadata)},
+            )
+            ref_resp.raise_for_status()
 
         start_resp = client.post(
             f"/api/v1/tasks/{task['task_id']}/start-gate-a",
@@ -180,9 +189,15 @@ with st.sidebar:
     mode = st.radio("Mode", ["Agent chat", "Generate image"], horizontal=False)
     preferred = st.selectbox("Preferred agent", ["Auto", "Ollama", "Claude Code", "Codex CLI"])
     output_type = st.radio("Output type", ["static_image", "video"], horizontal=True)
-    reference = st.file_uploader("Optional reference", type=["png", "jpg", "jpeg", "webp"])
-    if reference:
-        st.image(reference, caption=reference.name, use_column_width=True)
+    reference_files = st.file_uploader(
+        "Optional references",
+        type=["png", "jpg", "jpeg", "webp"],
+        accept_multiple_files=True,
+    )
+    if reference_files:
+        st.caption(f"{len(reference_files)} reference file(s) ready for the next message.")
+        for reference in reference_files:
+            st.image(reference, caption=reference.name, use_column_width=True)
     st.session_state.task_id = st.text_input("Current task", st.session_state.task_id)
     if st.button("Refresh status", use_container_width=True):
         st.rerun()
@@ -200,6 +215,11 @@ if st.session_state.task_id:
         col_c.metric("Generated", len(summary["latest_generated_asset_ids"]))
         with st.chat_message("assistant"):
             st.markdown(_latest_job_line(history))
+            lines = progress_lines(history)
+            if lines:
+                st.markdown("**Progress**")
+                for line in lines[-5:]:
+                    st.markdown(f"- {line}")
             for asset_id in summary["latest_generated_asset_ids"]:
                 st.image(f"{PUBLIC_API_BASE}/api/v1/assets/{asset_id}/download", caption=asset_id)
 
@@ -246,7 +266,10 @@ if st.session_state.task_id:
 
 prompt = st.chat_input("Message the workflow agent")
 if prompt:
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    current_references = list(reference_files or [])
+    st.session_state.messages.append(
+        {"role": "user", "content": format_user_message(prompt, reference_summaries(current_references))}
+    )
     preferred_agent = {
         "Auto": None,
         "Ollama": "local_ollama",
@@ -255,12 +278,12 @@ if prompt:
     }[preferred]
     try:
         if mode == "Generate image":
-            if reference is None:
+            if not current_references:
                 st.session_state.messages.append(
-                    {"role": "assistant", "content": "Attach a reference image, then send the image brief again."}
+                    {"role": "assistant", "content": "Attach one or more reference images, then send the image brief again."}
                 )
             else:
-                started = _create_and_start_task(prompt, reference, output_type)
+                started = _create_and_start_task(prompt, current_references, output_type)
                 st.session_state.task_id = started["task_id"]
                 st.session_state.messages.append(
                     {
@@ -293,3 +316,9 @@ if prompt:
     except httpx.HTTPError as exc:
         st.session_state.messages.append({"role": "assistant", "content": f"Server request failed: `{exc}`"})
     st.rerun()
+
+if st.session_state.task_id:
+    _summary, _history = _task_snapshot(st.session_state.task_id)
+    if _summary and _history and active_worker_job(_history):
+        time.sleep(2)
+        st.rerun()
