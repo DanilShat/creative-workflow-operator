@@ -76,6 +76,21 @@ def infer_output_type(prompt: str) -> str:
     return "video" if "video" in prompt.lower() else "static_image"
 
 
+def task_user_message(summary: dict[str, Any], history: dict[str, Any]) -> str:
+    """Reconstruct the submitted task as a user chat bubble from server state."""
+
+    references = [
+        {
+            "name": str(asset.get("original_filename") or asset.get("asset_id") or "reference"),
+            "size_label": "stored",
+            "content_type": str(asset.get("content_type") or "reference"),
+        }
+        for asset in history.get("assets", [])
+        if asset.get("asset_class") == "reference"
+    ]
+    return format_user_message(str(summary.get("brief_text") or ""), references)
+
+
 def _size_label(size: int) -> str:
     if size >= 1024 * 1024:
         return f"{size / (1024 * 1024):.1f} MB"

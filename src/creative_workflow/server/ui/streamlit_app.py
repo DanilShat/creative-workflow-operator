@@ -23,6 +23,7 @@ from creative_workflow.server.ui.view_models import (
     infer_output_type,
     progress_lines,
     reference_summaries,
+    task_user_message,
 )
 
 
@@ -210,6 +211,8 @@ if st.session_state.task_id:
         col_a.metric("Task", summary["task_id"])
         col_b.metric("State", summary["workflow_state"])
         col_c.metric("Generated", len(summary["latest_generated_asset_ids"]))
+        with st.chat_message("user"):
+            st.markdown(task_user_message(summary, history))
         with st.chat_message("assistant"):
             st.markdown(_latest_job_line(history))
             lines = progress_lines(history)

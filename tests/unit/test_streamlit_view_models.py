@@ -5,6 +5,7 @@ from creative_workflow.server.ui.view_models import (
     format_user_message,
     infer_output_type,
     reference_summaries,
+    task_user_message,
 )
 
 
@@ -47,3 +48,22 @@ def test_active_worker_job_detects_nonterminal_latest_job() -> None:
 def test_infer_output_type_uses_video_keyword_only_when_present() -> None:
     assert infer_output_type("Create a short looping video for this product.") == "video"
     assert infer_output_type("Create a square product image.") == "static_image"
+
+
+def test_task_user_message_reconstructs_brief_and_reference_names_from_history() -> None:
+    summary = {"brief_text": "Create a cozy product visual."}
+    history = {
+        "assets": [
+            {"asset_class": "reference", "original_filename": "front.png"},
+            {"asset_class": "generated", "original_filename": "output.png"},
+            {"asset_class": "reference", "original_filename": "side.jpg"},
+        ]
+    }
+
+    message = task_user_message(summary, history)
+
+    assert "Create a cozy product visual." in message
+    assert "Attached references" in message
+    assert "front.png" in message
+    assert "side.jpg" in message
+    assert "output.png" not in message

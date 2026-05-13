@@ -81,3 +81,10 @@ def test_removed_manual_routing_variables_are_not_referenced() -> None:
             stale_names.append((node.id, node.lineno))
 
     assert stale_names == []
+
+
+def test_current_task_is_rendered_as_server_backed_user_message() -> None:
+    source = Path("src/creative_workflow/server/ui/streamlit_app.py").read_text(encoding="utf-8")
+
+    assert "task_user_message" in source
+    assert 'st.chat_message("user")' in source
