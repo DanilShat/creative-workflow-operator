@@ -45,3 +45,25 @@ def test_reference_uploader_accepts_multiple_files() -> None:
         any(keyword.arg == "accept_multiple_files" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True for keyword in call.keywords)
         for call in uploader_calls
     )
+
+
+def test_chat_composer_uses_multiline_text_area_instead_of_chat_input() -> None:
+    source = Path("src/creative_workflow/server/ui/streamlit_app.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    has_text_area = False
+    chat_input_lines: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute):
+            continue
+        if not isinstance(node.func.value, ast.Name) or node.func.value.id != "st":
+            continue
+        if node.func.attr == "text_area":
+            has_text_area = True
+        if node.func.attr == "chat_input":
+            chat_input_lines.append(node.lineno)
+
+    assert has_text_area
+    assert chat_input_lines == []

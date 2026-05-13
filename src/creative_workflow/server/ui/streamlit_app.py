@@ -171,6 +171,8 @@ if "task_id" not in st.session_state:
     st.session_state.task_id = ""
 if "tracked_jobs" not in st.session_state:
     st.session_state.tracked_jobs = {}
+if "composer_text" not in st.session_state:
+    st.session_state.composer_text = ""
 
 _sync_tracked_jobs()
 
@@ -264,8 +266,17 @@ if st.session_state.task_id:
         with st.expander("Task history"):
             st.json(history)
 
-prompt = st.chat_input("Message the workflow agent")
-if prompt:
+with st.container():
+    prompt = st.text_area(
+        "Message the workflow agent",
+        key="composer_text",
+        height=150,
+        placeholder="Paste the brief here. Attach references in the sidebar when you want an image run.",
+    )
+    send_clicked = st.button("Send", type="primary", use_container_width=True)
+
+if send_clicked and prompt.strip():
+    prompt = prompt.strip()
     current_references = list(reference_files or [])
     st.session_state.messages.append(
         {"role": "user", "content": format_user_message(prompt, reference_summaries(current_references))}
@@ -315,6 +326,7 @@ if prompt:
                 )
     except httpx.HTTPError as exc:
         st.session_state.messages.append({"role": "assistant", "content": f"Server request failed: `{exc}`"})
+    st.session_state.composer_text = ""
     st.rerun()
 
 if st.session_state.task_id:
