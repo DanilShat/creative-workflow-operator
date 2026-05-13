@@ -20,6 +20,7 @@ import streamlit as st
 from creative_workflow.server.ui.view_models import (
     active_worker_job,
     format_user_message,
+    infer_output_type,
     progress_lines,
     reference_summaries,
 )
@@ -171,8 +172,6 @@ if "task_id" not in st.session_state:
     st.session_state.task_id = ""
 if "tracked_jobs" not in st.session_state:
     st.session_state.tracked_jobs = {}
-if "composer_text" not in st.session_state:
-    st.session_state.composer_text = ""
 
 _sync_tracked_jobs()
 
@@ -187,12 +186,9 @@ st.markdown(
 )
 
 with st.sidebar:
-    st.subheader("Session")
-    mode = st.radio("Mode", ["Agent chat", "Generate image"], horizontal=False)
-    preferred = st.selectbox("Preferred agent", ["Auto", "Ollama", "Claude Code", "Codex CLI"])
-    output_type = st.radio("Output type", ["static_image", "video"], horizontal=True)
+    st.subheader("References")
     reference_files = st.file_uploader(
-        "Optional references",
+        "Attach for next message",
         type=["png", "jpg", "jpeg", "webp"],
         accept_multiple_files=True,
     )
@@ -200,7 +196,6 @@ with st.sidebar:
         st.caption(f"{len(reference_files)} reference file(s) ready for the next message.")
         for reference in reference_files:
             st.image(reference, caption=reference.name, use_column_width=True)
-    st.session_state.task_id = st.text_input("Current task", st.session_state.task_id)
     if st.button("Refresh status", use_container_width=True):
         st.rerun()
 
@@ -266,17 +261,8 @@ if st.session_state.task_id:
         with st.expander("Task history"):
             st.json(history)
 
-with st.container():
-    prompt = st.text_area(
-        "Message the workflow agent",
-        key="composer_text",
-        height=150,
-        placeholder="Paste the brief here. Attach references in the sidebar when you want an image run.",
-    )
-    send_clicked = st.button("Send", type="primary", use_container_width=True)
-
-if send_clicked and prompt.strip():
-    prompt = prompt.strip()
+prompt = st.chat_input("Message the workflow agent")
+if prompt:
     current_references = list(reference_files or [])
     st.session_state.messages.append(
         {"role": "user", "content": format_user_message(prompt, reference_summaries(current_references))}
@@ -288,25 +274,20 @@ if send_clicked and prompt.strip():
         "Codex CLI": "codex_cli",
     }[preferred]
     try:
-        if mode == "Generate image":
-            if not current_references:
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": "Attach one or more reference images, then send the image brief again."}
-                )
-            else:
-                started = _create_and_start_task(prompt, current_references, output_type)
-                st.session_state.task_id = started["task_id"]
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": (
-                            f"Started `{started['task_id']}`. "
-                            f"Run `{started['run_id']}` created jobs: `{', '.join(started['created_job_ids'])}`."
-                        ),
-                    }
-                )
+        if current_references:
+            started = _create_and_start_task(prompt, current_references, infer_output_type(prompt))
+            st.session_state.task_id = started["task_id"]
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": (
+                        f"Started `{started['task_id']}`. "
+                        f"Run `{started['run_id']}` created jobs: `{', '.join(started['created_job_ids'])}`."
+                    ),
+                }
+            )
         else:
-            created = _create_agent_chat(prompt, st.session_state.task_id or None, preferred_agent)
+            created = _create_agent_chat(prompt, st.session_state.task_id or None, None)
             st.session_state.task_id = created["task_id"]
             if created.get("reply"):
                 reply = created["reply"]
@@ -326,7 +307,6 @@ if send_clicked and prompt.strip():
                 )
     except httpx.HTTPError as exc:
         st.session_state.messages.append({"role": "assistant", "content": f"Server request failed: `{exc}`"})
-    st.session_state.composer_text = ""
     st.rerun()
 
 if st.session_state.task_id:

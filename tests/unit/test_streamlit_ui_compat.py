@@ -47,11 +47,11 @@ def test_reference_uploader_accepts_multiple_files() -> None:
     )
 
 
-def test_chat_composer_uses_multiline_text_area_instead_of_chat_input() -> None:
+def test_chat_composer_uses_chat_input_without_manual_routing_controls() -> None:
     source = Path("src/creative_workflow/server/ui/streamlit_app.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
 
-    has_text_area = False
+    has_chat_input = False
     chat_input_lines: list[int] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -60,10 +60,12 @@ def test_chat_composer_uses_multiline_text_area_instead_of_chat_input() -> None:
             continue
         if not isinstance(node.func.value, ast.Name) or node.func.value.id != "st":
             continue
-        if node.func.attr == "text_area":
-            has_text_area = True
         if node.func.attr == "chat_input":
+            has_chat_input = True
             chat_input_lines.append(node.lineno)
 
-    assert has_text_area
-    assert chat_input_lines == []
+    assert has_chat_input
+    assert chat_input_lines
+    assert '"Mode"' not in source
+    assert '"Preferred agent"' not in source
+    assert '"Output type"' not in source

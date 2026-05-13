@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from creative_workflow.server.ui.view_models import (
     active_worker_job,
     format_user_message,
+    infer_output_type,
     reference_summaries,
 )
 
@@ -41,3 +42,8 @@ def test_active_worker_job_detects_nonterminal_latest_job() -> None:
 
     assert active_worker_job(history)["job_id"] == "job_waiting"
     assert active_worker_job({"jobs": [{"job_id": "job_done", "state": "completed"}]}) is None
+
+
+def test_infer_output_type_uses_video_keyword_only_when_present() -> None:
+    assert infer_output_type("Create a short looping video for this product.") == "video"
+    assert infer_output_type("Create a square product image.") == "static_image"

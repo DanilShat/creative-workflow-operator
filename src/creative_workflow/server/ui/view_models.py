@@ -70,6 +70,12 @@ def progress_lines(history: dict[str, Any]) -> list[str]:
     return lines
 
 
+def infer_output_type(prompt: str) -> str:
+    """Infer the workflow output type from a natural chat message."""
+
+    return "video" if "video" in prompt.lower() else "static_image"
+
+
 def _size_label(size: int) -> str:
     if size >= 1024 * 1024:
         return f"{size / (1024 * 1024):.1f} MB"
