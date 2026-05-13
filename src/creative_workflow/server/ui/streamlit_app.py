@@ -182,7 +182,7 @@ with st.sidebar:
     output_type = st.radio("Output type", ["static_image", "video"], horizontal=True)
     reference = st.file_uploader("Optional reference", type=["png", "jpg", "jpeg", "webp"])
     if reference:
-        st.image(reference, caption=reference.name, use_container_width=True)
+        st.image(reference, caption=reference.name, use_column_width=True)
     st.session_state.task_id = st.text_input("Current task", st.session_state.task_id)
     if st.button("Refresh status", use_container_width=True):
         st.rerun()
