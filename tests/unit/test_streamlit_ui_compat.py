@@ -69,3 +69,15 @@ def test_chat_composer_uses_chat_input_without_manual_routing_controls() -> None
     assert '"Mode"' not in source
     assert '"Preferred agent"' not in source
     assert '"Output type"' not in source
+
+
+def test_removed_manual_routing_variables_are_not_referenced() -> None:
+    source = Path("src/creative_workflow/server/ui/streamlit_app.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    stale_names: list[tuple[str, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in {"preferred", "mode"}:
+            stale_names.append((node.id, node.lineno))
+
+    assert stale_names == []

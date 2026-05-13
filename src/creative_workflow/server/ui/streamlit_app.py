@@ -267,12 +267,6 @@ if prompt:
     st.session_state.messages.append(
         {"role": "user", "content": format_user_message(prompt, reference_summaries(current_references))}
     )
-    preferred_agent = {
-        "Auto": None,
-        "Ollama": "local_ollama",
-        "Claude Code": "claude_cli",
-        "Codex CLI": "codex_cli",
-    }[preferred]
     try:
         if current_references:
             started = _create_and_start_task(prompt, current_references, infer_output_type(prompt))
