@@ -20,7 +20,7 @@ GEMINI_ACTION = "gemini_build_prompt_from_brief_and_refs"
 FREEPIK_ACTION = "freepik_generate_image_from_prompt"
 AGENT_CHAT_ACTION = "designer_agent_chat"
 AGENT_CHAT_CAPABILITY = "agent.chat"
-GEMINI_PHOTO_GEM_URL = "https://gemini.google.com/gem/5f69a5afc4b5"
+GEMINI_PHOTO_GEM_URL = "https://gemini.google.com/gem/4dd4618f8ae1"
 GEMINI_VIDEO_GEM_URL = "https://gemini.google.com/gem/21d5be0eae0a"
 
 
@@ -64,8 +64,9 @@ class WorkflowService:
         self.db.flush()
         normalized = self.llm.normalize_brief(task.brief_text)
         route = self.llm.route_for_gate_a(normalized)
+        source_asset_id = references[0].asset_id if references else None
         jobs = [
-            self._make_gemini_job(task, run, references, operator_note, route.reason)
+            self._make_gemini_job(task, run, references, operator_note, route.reason, source_asset_id)
             for _ in range(variant_count)
         ]
         task.workflow_state = WorkflowState.WAITING_WORKER.value
@@ -74,6 +75,7 @@ class WorkflowService:
             "route": route.model_dump(),
             "variant_count": variant_count,
             "created_job_ids": [j.job_id for j in jobs],
+            "llm_orchestration": self.llm.orchestration_meta(),
         })
         self.db.commit()
         return run, jobs
@@ -202,7 +204,13 @@ class WorkflowService:
             )
             self.db.add(prompt)
             refs = self._reference_assets(job.task_id)
-            freepik_job = self._make_freepik_job(task, self.db.get(Run, job.run_id), refs, prompt_text)
+            freepik_job = self._make_freepik_job(
+                task,
+                self.db.get(Run, job.run_id),
+                refs,
+                prompt_text,
+                source_asset_id=job.inputs_json.get("source_asset_id"),
+            )
             task.workflow_state = WorkflowState.WAITING_WORKER.value
             self._event(job.task_id, job.run_id, freepik_job.job_id, "freepik_job_created", {
                 "source_prompt_id": prompt.prompt_id,
@@ -255,12 +263,14 @@ class WorkflowService:
         self.db.add(run)
         self.db.flush()
         refs = self._reference_assets(task_id)
+        source_asset_id = refs[0].asset_id if refs else None
         job = self._make_gemini_job(
             task,
             run,
             refs,
             operator_note=decision.repair_instruction or repair_instruction,
             route_reason=decision.reason,
+            source_asset_id=source_asset_id,
         )
         task.workflow_state = WorkflowState.WAITING_WORKER.value
         self._event(task_id, run.run_id, job.job_id, "retry_requested", {
@@ -271,7 +281,7 @@ class WorkflowService:
         self.db.commit()
         return run, [job]
 
-    def _make_gemini_job(self, task: Task, run: Run, refs: list[Asset], operator_note: str | None, route_reason: str) -> Job:
+    def _make_gemini_job(self, task: Task, run: Run, refs: list[Asset], operator_note: str | None, route_reason: str, source_asset_id: str | None = None) -> Job:
         job = Job(
             job_id=new_id("job"),
             task_id=task.task_id,
@@ -285,6 +295,7 @@ class WorkflowService:
                 "requested_output_type": task.requested_output_type,
                 "gemini_url": self._gemini_url_for_task(task),
                 "reference_asset_ids": [asset.asset_id for asset in refs],
+                "source_asset_id": source_asset_id,
                 "prompt_builder_instruction": "Create a production-ready Freepik image prompt from the brief and references.",
                 "route_reason": route_reason,
             },
@@ -297,7 +308,7 @@ class WorkflowService:
         self.db.add(job)
         return job
 
-    def _make_freepik_job(self, task: Task, run: Run, refs: list[Asset], prompt_text: str) -> Job:
+    def _make_freepik_job(self, task: Task, run: Run, refs: list[Asset], prompt_text: str, source_asset_id: str | None = None) -> Job:
         job = Job(
             job_id=new_id("job"),
             task_id=task.task_id,
@@ -307,8 +318,9 @@ class WorkflowService:
             action_name=FREEPIK_ACTION,
             inputs_json={
                 "prompt": prompt_text,
-                "refs": [asset.asset_id for asset in refs],
-                "settings": {"aspect_ratio": "1:1"},
+                "source_asset_id": source_asset_id,
+                "reference_asset_ids": [asset.asset_id for asset in refs],
+                "settings": {"aspect_ratio": "4:5"},
                 "timeout_s": self.settings.default_browser_timeout_s,
             },
             state=JobState.QUEUED.value,

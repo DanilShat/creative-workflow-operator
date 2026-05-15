@@ -20,6 +20,7 @@ import streamlit as st
 from creative_workflow.server.ui.view_models import (
     active_worker_job,
     format_user_message,
+    gate_a_submit_blocked,
     infer_output_type,
     progress_lines,
     reference_summaries,
@@ -173,6 +174,8 @@ if "task_id" not in st.session_state:
     st.session_state.task_id = ""
 if "tracked_jobs" not in st.session_state:
     st.session_state.tracked_jobs = {}
+if "last_gate_a_key" not in st.session_state:
+    st.session_state.last_gate_a_key = ""
 
 _sync_tracked_jobs()
 
@@ -272,17 +275,32 @@ if prompt:
     )
     try:
         if current_references:
-            started = _create_and_start_task(prompt, current_references, infer_output_type(prompt))
-            st.session_state.task_id = started["task_id"]
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": (
-                        f"Started `{started['task_id']}`. "
-                        f"Run `{started['run_id']}` created jobs: `{', '.join(started['created_job_ids'])}`."
-                    ),
-                }
+            file_digests = [_sha256(ref.getvalue()) for ref in current_references]
+            gate_a_key = _sha256((prompt + "|" + "|".join(file_digests)).encode())
+            current_history: dict | None = None
+            if st.session_state.task_id:
+                _, current_history = _task_snapshot(st.session_state.task_id)
+            block_reason = gate_a_submit_blocked(
+                st.session_state.task_id or None,
+                current_history,
+                gate_a_key,
+                st.session_state.last_gate_a_key,
             )
+            if block_reason:
+                st.session_state.messages.append({"role": "assistant", "content": block_reason})
+            else:
+                started = _create_and_start_task(prompt, current_references, infer_output_type(prompt))
+                st.session_state.task_id = started["task_id"]
+                st.session_state.last_gate_a_key = gate_a_key
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": (
+                            f"Started `{started['task_id']}`. "
+                            f"Run `{started['run_id']}` created jobs: `{', '.join(started['created_job_ids'])}`."
+                        ),
+                    }
+                )
         else:
             created = _create_agent_chat(prompt, st.session_state.task_id or None, None)
             st.session_state.task_id = created["task_id"]

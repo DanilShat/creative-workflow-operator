@@ -91,6 +91,25 @@ def task_user_message(summary: dict[str, Any], history: dict[str, Any]) -> str:
     return format_user_message(str(summary.get("brief_text") or ""), references)
 
 
+def gate_a_submit_blocked(
+    session_task_id: str | None,
+    history: dict[str, Any] | None,
+    new_key: str,
+    last_key: str,
+) -> str | None:
+    """Return a block reason if Gate A submit should be prevented, else None.
+
+    Prevents duplicate task creation from two sources:
+    - same idempotency key (exact same prompt+files submitted twice in a session)
+    - an active worker job is already running for the current task
+    """
+    if new_key and new_key == last_key:
+        return "This request was already submitted. The previous task is being tracked above."
+    if session_task_id and history and active_worker_job(history):
+        return "A Gate A run is already active. Wait for the current job to complete before starting another."
+    return None
+
+
 def _size_label(size: int) -> str:
     if size >= 1024 * 1024:
         return f"{size / (1024 * 1024):.1f} MB"
