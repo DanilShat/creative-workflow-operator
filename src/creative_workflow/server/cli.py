@@ -88,6 +88,8 @@ def dev(host: str = "0.0.0.0", port: int = 8000):
         for error in errors:
             typer.echo(f"FAIL: {error}")
         raise typer.Exit(1)
+    typer.echo(f"Operator console:  http://127.0.0.1:{port}/app/")
+    typer.echo(f"API docs:          http://127.0.0.1:{port}/docs")
     uvicorn.run(create_app(settings), host=host, port=port)
 
 

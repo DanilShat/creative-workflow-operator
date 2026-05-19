@@ -11,7 +11,7 @@ from creative_workflow.server.config import ServerSettings
 from creative_workflow.server.db.models import Task
 from creative_workflow.server.db.session import get_db
 from creative_workflow.server.services.artifacts import ArtifactService
-from creative_workflow.server.services.summaries import task_history, task_summary
+from creative_workflow.server.services.summaries import task_history, task_list, task_summary
 from creative_workflow.server.services.workflow import WorkflowService
 from creative_workflow.shared.contracts.assets import ReferenceUploadMetadata, ReferenceUploadResponse
 from creative_workflow.shared.enums import AssetClass, RetentionClass
@@ -32,6 +32,12 @@ from creative_workflow.shared.contracts.tasks import (
 from creative_workflow.shared.time import utc_now
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
+
+
+@router.get("")
+def list_tasks(db: Session = Depends(get_db)):
+    """List every task, newest first. Used by the operator console gallery."""
+    return task_list(db)
 
 
 @router.post("", response_model=TaskCreateResponse)

@@ -8,6 +8,7 @@ from creative_workflow.server.config import ServerSettings
 from creative_workflow.server.db.models import Worker
 from creative_workflow.server.db.session import get_db
 from creative_workflow.server.services.job_queue import JobQueueService
+from creative_workflow.server.services.summaries import worker_list
 from creative_workflow.shared.contracts.workers import (
     ClaimNextRequest,
     ClaimNextResponse,
@@ -19,6 +20,12 @@ from creative_workflow.shared.contracts.workers import (
 from creative_workflow.shared.time import iso_now, utc_now
 
 router = APIRouter(prefix="/api/v1/workers", tags=["workers"])
+
+
+@router.get("")
+def list_workers(db: Session = Depends(get_db)):
+    """List registered workers. Used by the operator console system panel."""
+    return worker_list(db)
 
 
 @router.post("/register", response_model=WorkerRegisterResponse)

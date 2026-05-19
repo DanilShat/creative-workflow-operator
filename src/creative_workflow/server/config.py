@@ -35,6 +35,9 @@ class ServerSettings:
     claim_poll_interval_s: int = 3
     active_job_lease_ttl_s: int = 90
     default_browser_timeout_s: int = 1200
+    # How often the server sweeps expired job leases back to ORPHANED so a
+    # stranded job self-heals and the worker is freed without manual action.
+    orphan_sweep_interval_s: int = 30
 
     @classmethod
     def load(cls, env_file: str | Path | None = ".env.server") -> "ServerSettings":
