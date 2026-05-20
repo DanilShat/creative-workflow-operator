@@ -13,7 +13,13 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from creative_workflow.server.config import ServerSettings
-from creative_workflow.shared.contracts.llm import BriefNormalization, RetryRepairDecision, RouteDecision
+from creative_workflow.shared.contracts.llm import (
+    BriefNormalization,
+    ChatIntent,
+    RetryRepairDecision,
+    RouteDecision,
+    TitleResult,
+)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -89,6 +95,55 @@ class LocalLLMService:
             "route_source": self._last_route_source,
             "model": self.settings.ollama_model,
         }
+
+    def auto_title(self, message: str) -> str | None:
+        """Produce a short title for a new conversation, or None on failure."""
+
+        schema = json.dumps(TitleResult.model_json_schema(), ensure_ascii=True)
+        prompt = (
+            "You write very short conversation titles for a creative app.\n"
+            f"Return only a JSON object matching this schema:\n{schema}\n\n"
+            "The title must be 3-6 real words summarizing the user's request. "
+            'Never echo the schema field name. Examples of good titles: '
+            '"Spring coffee hero", "Christmas cat card", "Packshot variants for serum".\n\n'
+            f"User message: {message}"
+        )
+        result = self._json_call(prompt, TitleResult)
+        if result is None:
+            return None
+        title = result.title.strip().strip('"').strip("'").strip(".:- ")
+        # Small models sometimes regurgitate the schema's field name. Reject
+        # those so the caller can fall back to a heuristic.
+        normalized = title.replace(" ", "").lower()
+        if not title or normalized in {"titleresult", "title", "untitled", "string", "name", "object"}:
+            return None
+        return title[:80]
+
+    def classify_chat_intent(self, message: str, context_line: str) -> ChatIntent | None:
+        """Classify a chat turn into an action the orchestrator can route.
+
+        Returns None on Ollama failure so the caller falls back to the
+        phase-2 deterministic rules. Never raises.
+        """
+
+        schema = json.dumps(ChatIntent.model_json_schema(), ensure_ascii=True)
+        prompt = (
+            "Classify what the user is asking for in the Creative Workflow app. "
+            "Return only valid JSON matching this schema:\n"
+            f"{schema}\n\n"
+            "Allowed type values:\n"
+            "- chat:          a question or comment that needs no action\n"
+            "- gate_a:        asks to GENERATE a new image or video\n"
+            "- approve_last:  reacts positively to the most recent result\n"
+            "- reject_last:   reacts negatively to the most recent result\n"
+            "- retry_last:    asks for a change/variation of the last result\n"
+            "If type is 'gate_a', also fill: title (3-6 words), "
+            "brief (the full description), and output_type "
+            "(\"static_image\" for image, \"video\" for video).\n\n"
+            f"Context: {context_line}\n"
+            f"User message: {message}"
+        )
+        return self._json_call(prompt, ChatIntent)
 
     def chat_text(self, message: str, context: dict | None = None) -> str:
         """Answer routine chat on the operator laptop through Ollama.

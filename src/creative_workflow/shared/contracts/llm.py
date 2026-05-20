@@ -34,3 +34,22 @@ class RetryRepairDecision(BaseModel):
     new_job_request: dict[str, Any] | None = None
     reason: str
 
+
+class TitleResult(BaseModel):
+    """A short conversation title produced by the local LLM."""
+
+    title: str = Field(min_length=1, max_length=80)
+
+
+class ChatIntent(BaseModel):
+    """The chat orchestrator's read of what the user is asking for.
+
+    ``type`` drives routing; the rest is filled when ``type == "gate_a"``
+    so a Gate A run can be started without a second LLM call.
+    """
+
+    type: Literal["chat", "gate_a", "approve_last", "reject_last", "retry_last"]
+    title: str | None = None
+    brief: str | None = None
+    output_type: Literal["static_image", "video"] | None = None
+

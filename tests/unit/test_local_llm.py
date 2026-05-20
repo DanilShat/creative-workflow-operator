@@ -189,6 +189,52 @@ def test_orchestration_meta_records_both_sources_independently(settings) -> None
 # JSON mode flag is sent in requests
 # ---------------------------------------------------------------------------
 
+def test_auto_title_returns_clean_string_on_valid_response(settings) -> None:
+    valid = json.dumps({"title": "Spring campaign hero"})
+    svc = LocalLLMService(settings, client_factory=_make_client_factory(valid))
+    assert svc.auto_title("Make a hero for spring") == "Spring campaign hero"
+
+
+def test_auto_title_strips_quote_wrapping(settings) -> None:
+    valid = json.dumps({"title": '"Spring campaign hero"'})
+    svc = LocalLLMService(settings, client_factory=_make_client_factory(valid))
+    assert svc.auto_title("anything") == "Spring campaign hero"
+
+
+def test_auto_title_returns_none_when_ollama_returns_garbage(settings) -> None:
+    svc = LocalLLMService(settings, client_factory=_make_client_factory("not json"))
+    assert svc.auto_title("anything") is None
+
+
+def test_classify_chat_intent_returns_chat_for_questions(settings) -> None:
+    valid = json.dumps({"type": "chat"})
+    svc = LocalLLMService(settings, client_factory=_make_client_factory(valid))
+    intent = svc.classify_chat_intent("what does Gate A do?", "no prior result")
+    assert intent is not None and intent.type == "chat"
+
+
+def test_classify_chat_intent_extracts_gate_a_fields(settings) -> None:
+    valid = json.dumps(
+        {
+            "type": "gate_a",
+            "title": "Hero kickoff",
+            "brief": "A bright product hero on a soft background.",
+            "output_type": "static_image",
+        }
+    )
+    svc = LocalLLMService(settings, client_factory=_make_client_factory(valid))
+    intent = svc.classify_chat_intent("make me a hero", "no prior result")
+    assert intent is not None
+    assert intent.type == "gate_a"
+    assert intent.title == "Hero kickoff"
+    assert intent.output_type == "static_image"
+
+
+def test_classify_chat_intent_returns_none_when_ollama_garbles(settings) -> None:
+    svc = LocalLLMService(settings, client_factory=_make_client_factory("not json"))
+    assert svc.classify_chat_intent("hi", "no prior result") is None
+
+
 def test_json_call_sends_format_json_to_ollama(settings) -> None:
     captured: list[dict] = []
 

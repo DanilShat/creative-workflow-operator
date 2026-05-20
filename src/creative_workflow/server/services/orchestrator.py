@@ -21,8 +21,9 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from creative_workflow.server.config import ServerSettings
-from creative_workflow.server.db.models import Asset, Conversation, Message, Run, Task
+from creative_workflow.server.db.models import Asset, Conversation, Message, Review, Run, Task
 from creative_workflow.server.services.artifacts import ArtifactService, sha256_bytes
+from creative_workflow.server.services.local_llm import LocalLLMService
 from creative_workflow.server.services.workflow import WorkflowService
 from creative_workflow.shared.contracts.assets import ReferenceUploadMetadata
 from creative_workflow.shared.contracts.conversations import (
@@ -70,11 +71,21 @@ def _infer_output_type(text: str) -> str:
 
 
 class ConversationOrchestrator:
-    def __init__(self, db: Session, settings: ServerSettings):
+    def __init__(
+        self,
+        db: Session,
+        settings: ServerSettings,
+        *,
+        llm: LocalLLMService | None = None,
+    ):
         self.db = db
         self.settings = settings
         self.workflow = WorkflowService(db, settings)
         self.artifacts = ArtifactService(db, settings)
+        # Injectable so tests can swap a fake brain. In production each
+        # request gets its own short-lived LocalLLMService — Ollama is
+        # localhost-bound and cheap to construct.
+        self.llm = llm if llm is not None else LocalLLMService(settings)
 
     # ---------- conversation CRUD ----------
 
@@ -142,6 +153,17 @@ class ConversationOrchestrator:
         if not (text or attachments or action):
             raise OrchestratorError("nothing to do — send text, an attachment, or an action")
 
+        # Remember whether this is the conversation's very first user message,
+        # so we can ask the local LLM for an auto-title after the turn lands.
+        is_first_turn = (
+            self.db.scalar(
+                select(func.count(Message.message_id)).where(
+                    Message.conversation_id == conv.conversation_id
+                )
+            )
+            or 0
+        ) == 0
+
         user_msg = Message(
             message_id=new_id("msg"),
             conversation_id=conv.conversation_id,
@@ -157,11 +179,20 @@ class ConversationOrchestrator:
             elif attachments:
                 agent_msg = self._handle_gate_a(conv, user_msg, text or "", attachments)
             else:
-                agent_msg = self._handle_text_only(conv)
+                agent_msg = self._handle_text_intent(conv, user_msg, text or "")
         except OrchestratorError:
             raise
         except Exception as exc:  # noqa: BLE001 - surface as a chat error, never lose the turn
             agent_msg = self._agent(conv, f"Something went wrong: {exc}")
+
+        if is_first_turn and (text or "").strip() and conv.title.strip().lower() == "untitled":
+            new_title = self.llm.auto_title(text or "")
+            if not new_title:
+                # Heuristic fallback so the sidebar never reads "Untitled"
+                # after the designer has clearly described something.
+                new_title = " ".join((text or "").split()[:5])[:60]
+            if new_title:
+                conv.title = new_title[:80]
 
         conv.updated_at = utc_now()
         self.db.commit()
@@ -225,9 +256,22 @@ class ConversationOrchestrator:
         text: str,
         attachments: list[tuple[bytes, str, str]],
     ) -> Message:
+        # Default to the phase-2 heuristic. If the LLM is up and confidently
+        # classifies this as a Gate A request, use its richer extraction.
         title = _derive_title_from_message(text)
         brief = text.strip() or "(image-only brief)"
         output_type = _infer_output_type(text)
+        if text.strip():
+            intent = self.llm.classify_chat_intent(
+                text, context_line="image attached — likely Gate A"
+            )
+            if intent is not None and intent.type == "gate_a":
+                if intent.title and intent.title.strip():
+                    title = intent.title.strip()[:80]
+                if intent.brief and intent.brief.strip():
+                    brief = intent.brief.strip()
+                if intent.output_type:
+                    output_type = intent.output_type
         variant_count = _parse_variant_count(text)
 
         task = self.workflow.create_task(
@@ -266,12 +310,165 @@ class ConversationOrchestrator:
             conv, reply, related_task_id=task.task_id, related_run_id=run.run_id
         )
 
-    def _handle_text_only(self, conv: Conversation) -> Message:
+    def _handle_text_intent(
+        self, conv: Conversation, user_msg: Message, text: str
+    ) -> Message:
+        """Classify the turn via the local LLM and route accordingly.
+
+        Falls back to a friendly deterministic reply when Ollama is down so
+        the chat never stalls on a dead model.
+        """
+
+        context_line = self._context_line(conv)
+        intent = self.llm.classify_chat_intent(text, context_line)
+        if intent is None:
+            # Best-effort: classification failed (Ollama down, or the small
+            # model returned unparseable JSON). Try chat_text, which has its
+            # own graceful fallback when Ollama itself is unreachable.
+            reply = self.llm.chat_text(text)
+            return self._agent(conv, reply)
+
+        if intent.type == "approve_last":
+            return self._handle_implicit_approve(conv, user_msg)
+        if intent.type == "reject_last":
+            return self._handle_implicit_reject(conv, user_msg, text)
+        if intent.type == "retry_last":
+            return self._handle_implicit_retry(conv, user_msg, text)
+        if intent.type == "gate_a":
+            return self._agent(
+                conv,
+                "Gate A needs at least one reference image. "
+                "Drop one in and I'll start the run.",
+            )
+
+        reply = self.llm.chat_text(text)
+        return self._agent(conv, reply)
+
+    # ----- implicit action handlers (driven by LLM intent on plain text) -----
+
+    def _handle_implicit_approve(
+        self, conv: Conversation, user_msg: Message
+    ) -> Message:
+        pair = self._last_actionable_run(conv)
+        if pair is None or pair[0].workflow_state != "waiting_human_review":
+            return self._agent(conv, "There's nothing waiting for review.")
+        task, run = pair
+        latest_asset = self.db.scalars(
+            select(Asset)
+            .where(
+                Asset.run_id == run.run_id,
+                Asset.asset_class == AssetClass.GENERATED.value,
+            )
+            .order_by(desc(Asset.created_at))
+            .limit(1)
+        ).first()
+        self.workflow.record_review(
+            task.task_id,
+            run.run_id,
+            "approved",
+            latest_asset.asset_id if latest_asset else None,
+            None,
+        )
+        user_msg.related_task_id = task.task_id
+        user_msg.related_run_id = run.run_id
         return self._agent(
             conv,
-            "I hear you. Real conversational replies arrive in the next phase — "
-            "for now, attach an image to start a Gate A run.",
+            "Approved.",
+            related_task_id=task.task_id,
+            related_run_id=run.run_id,
         )
+
+    def _handle_implicit_reject(
+        self, conv: Conversation, user_msg: Message, text: str
+    ) -> Message:
+        pair = self._last_actionable_run(conv)
+        if pair is None or pair[0].workflow_state != "waiting_human_review":
+            return self._agent(conv, "There's nothing waiting for review.")
+        task, run = pair
+        reason = text.strip() or "rejected"
+        self.workflow.record_review(task.task_id, run.run_id, "rejected", None, reason)
+        user_msg.related_task_id = task.task_id
+        user_msg.related_run_id = run.run_id
+        return self._agent(
+            conv,
+            "Got it — rejected. Tell me what to change and I'll retry.",
+            related_task_id=task.task_id,
+            related_run_id=run.run_id,
+        )
+
+    def _handle_implicit_retry(
+        self, conv: Conversation, user_msg: Message, text: str
+    ) -> Message:
+        pair = self._last_actionable_run(conv)
+        if pair is None:
+            return self._agent(conv, "There's no prior result to retry.")
+        task, run = pair
+        review = self.db.scalars(
+            select(Review)
+            .where(Review.task_id == task.task_id, Review.decision == "rejected")
+            .order_by(desc(Review.created_at))
+            .limit(1)
+        ).first()
+        if review is None:
+            # No prior rejection on this task: treat as conversation, not action.
+            reply = self.llm.chat_text(text)
+            return self._agent(conv, reply)
+        new_run, _ = self.workflow.retry_after_rejection(
+            task.task_id, review.run_id, review.review_id, text.strip() or "retry"
+        )
+        user_msg.related_task_id = task.task_id
+        user_msg.related_run_id = new_run.run_id
+        return self._agent(
+            conv,
+            "Running another attempt.",
+            related_task_id=task.task_id,
+            related_run_id=new_run.run_id,
+        )
+
+    # ----- conversation context helpers -----
+
+    def _context_line(self, conv: Conversation) -> str:
+        latest = self.db.scalars(
+            select(Task)
+            .where(Task.conversation_id == conv.conversation_id)
+            .order_by(desc(Task.created_at))
+            .limit(1)
+        ).first()
+        if latest is None:
+            return "no prior result in this conversation"
+        state = latest.workflow_state
+        if state == "waiting_human_review":
+            return "a result is waiting for the user's review"
+        if state == "human_rejected":
+            return "the previous result was rejected"
+        if state == "human_approved":
+            return "the previous result was approved"
+        if state == "failed":
+            return "the previous attempt failed"
+        if state in ("waiting_worker", "running_worker_job", "retry_requested"):
+            return "a result is currently being generated"
+        return f"state: {state}"
+
+    def _last_actionable_run(
+        self, conv: Conversation
+    ) -> tuple[Task, Run] | None:
+        task = self.db.scalars(
+            select(Task)
+            .where(Task.conversation_id == conv.conversation_id)
+            .order_by(desc(Task.created_at))
+            .limit(1)
+        ).first()
+        if task is None:
+            return None
+        run = self.db.scalars(
+            select(Run)
+            .where(Run.task_id == task.task_id)
+            .order_by(desc(Run.attempt_number))
+            .limit(1)
+        ).first()
+        if run is None:
+            return None
+        return task, run
 
     # ---------- view-model helpers ----------
 

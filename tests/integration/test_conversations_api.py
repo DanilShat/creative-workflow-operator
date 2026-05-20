@@ -89,7 +89,14 @@ def test_rename_conversation(tmp_path, server_settings):
 # ---------------- message routing ----------------
 
 
-def test_text_only_message_yields_placeholder_agent_reply(tmp_path, server_settings):
+def test_text_only_message_returns_some_agent_reply(tmp_path, server_settings):
+    """The end-to-end path always produces an agent reply.
+
+    The exact text depends on whether Ollama is reachable — phase-3 routes
+    through the local model on success and falls back gracefully when it is
+    not. Deterministic brain behavior is exercised in test_orchestrator_brain.
+    """
+
     client, _ = _client(tmp_path, server_settings)
     cid = client.post("/api/v1/conversations", json={"title": "t"}).json()["conversation_id"]
 
@@ -100,7 +107,8 @@ def test_text_only_message_yields_placeholder_agent_reply(tmp_path, server_setti
     assert body["user_message"]["role"] == "user"
     assert body["user_message"]["content"] == "what can you do?"
     assert body["agent_message"] is not None
-    assert "next phase" in body["agent_message"]["content"].lower()
+    assert body["agent_message"]["role"] == "agent"
+    assert len(body["agent_message"]["content"]) > 0
 
 
 def test_empty_message_is_rejected(tmp_path, server_settings):
