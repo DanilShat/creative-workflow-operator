@@ -510,27 +510,17 @@ function renderMain() {
   const r = parseRoute();
   const main = h("main", { class: "main" });
 
-  if (r.name === "home" && !app.activeId) {
-    main.append(renderHomeEmpty());
-    return main;
-  }
   if (r.name === "conv" && !app.detail) {
     main.append(renderLoading());
     return main;
   }
+  // Home or new-chat: composer is always ready. The thread body handles
+  // the "no active conversation" empty state internally so '+ New chat'
+  // visibly transitions into a typeable view.
   main.append(renderHeader());
   main.append(renderThreadBody());
   main.append(renderComposer());
   return main;
-}
-
-function renderHomeEmpty() {
-  return h("div", { class: "center-state" },
-    h("div", { class: "big" }, "💬"),
-    h("div", { class: "head" }, "Start a conversation"),
-    h("div", {}, "Describe what you want, or drop an image to start a Gate A run."),
-    h("button", { class: "new-chat-btn", style: { margin: "10px 0 0" }, onclick: startNewChat },
-      h("span", {}, "✚"), h("span", {}, "New chat")));
 }
 
 function renderLoading() {
@@ -553,10 +543,12 @@ function renderThreadBody() {
   body.append(inner);
 
   if (!app.activeId) {
-    // brand-new local chat — empty state inside the thread
-    inner.append(h("div", { class: "center-state", style: { padding: "30px 10px" } },
-      h("div", { class: "big" }, "✦"),
-      h("div", { class: "head" }, "What should we make?"),
+    // No conversation selected — show a friendly "type here" state.
+    // The composer is rendered below this body, so the user can act.
+    const firstVisit = !(app.conversations && app.conversations.length);
+    inner.append(h("div", { class: "center-state", style: { padding: "60px 10px 30px" } },
+      h("div", { class: "big" }, firstVisit ? "💬" : "✦"),
+      h("div", { class: "head" }, firstVisit ? "Start a conversation" : "What should we make?"),
       h("div", {}, "Drop a reference image and tell me what you want.")));
     return body;
   }
