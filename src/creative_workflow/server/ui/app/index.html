@@ -736,10 +736,12 @@ function renderComposer() {
     if (files.length) { app.composer.files = app.composer.files.concat(files); render(); }
   });
 
+  // For <textarea>, the visible text must be a child text node — setting a
+  // `value` attribute does nothing, which is exactly what was wiping the
+  // composer on every poll/render.
   const textarea = h("textarea", {
     placeholder: "Tell me what you want, or react to the last result…",
     rows: "1",
-    value: app.composer.text,
     oninput: e => {
       app.composer.text = e.target.value;
       autoSize(e.target);
@@ -747,7 +749,7 @@ function renderComposer() {
     onkeydown: e => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
     },
-  });
+  }, app.composer.text);
 
   box.append(
     h("button", { class: "icon-btn", title: "Attach image",
@@ -764,7 +766,15 @@ function renderComposer() {
   inner.append(h("div", { class: "composer-help" },
     "Enter to send • Shift+Enter for newline • Drop an image to start Gate A"));
 
-  setTimeout(() => { autoSize(textarea); textarea.focus(); }, 0);
+  setTimeout(() => {
+    autoSize(textarea);
+    // Only steal focus on the very first render of the composer (when
+    // nothing else is focused yet). On subsequent re-renders, the
+    // render() shell restores the previous selection so typing is smooth.
+    if (document.activeElement === document.body || document.activeElement === null) {
+      textarea.focus();
+    }
+  }, 0);
   return wrap;
 }
 
@@ -1020,9 +1030,26 @@ async function onRouteChange() {
 }
 
 function render() {
+  // Snapshot the composer's cursor/selection so a poll mid-typing doesn't
+  // jump the caret to the end of the line.
+  let composerSnap = null;
+  const oldTa = document.querySelector(".composer-box textarea");
+  if (oldTa && document.activeElement === oldTa) {
+    composerSnap = { start: oldTa.selectionStart, end: oldTa.selectionEnd };
+  }
+
   const root = document.getElementById("root");
   clear(root);
   root.append(renderSidebar(), renderMain());
+
+  if (composerSnap) {
+    setTimeout(() => {
+      const ta = document.querySelector(".composer-box textarea");
+      if (!ta) return;
+      ta.focus();
+      try { ta.setSelectionRange(composerSnap.start, composerSnap.end); } catch {}
+    }, 0);
+  }
   if (app.lightbox) {
     const src = (app.lightbox.startsWith("blob:") || app.lightbox.startsWith("http"))
       ? app.lightbox : assetUrl(app.lightbox);
