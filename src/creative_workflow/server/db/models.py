@@ -41,10 +41,31 @@ class WorkerToken(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Conversation(Base):
+    """One designer chat. Multiple Gate A tasks may live inside it.
+
+    Soft-delete: setting `hidden_at` removes the row from the designer's
+    sidebar without losing history — the data stays in the database.
+    """
+
+    __tablename__ = "conversations"
+
+    conversation_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    title: Mapped[str] = mapped_column(String(255), default="Untitled")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Task(Base):
     __tablename__ = "tasks"
 
     task_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # Tasks created before the chat-driven UI keep `conversation_id = NULL`
+    # and continue to work unchanged.
+    conversation_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("conversations.conversation_id")
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     brief_text: Mapped[str] = mapped_column(Text, nullable=False)
     requested_output_type: Mapped[str] = mapped_column(String(64), default="static_image")
@@ -150,5 +171,29 @@ class WorkflowEvent(Base):
     job_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("jobs.job_id"))
     event_type: Mapped[str] = mapped_column(String(128), nullable=False)
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class Message(Base):
+    """A single turn in a Conversation.
+
+    `role` is one of "user", "agent", or "system". Action-only messages
+    (Approve / Reject button clicks) carry `content = ""` and an attachments
+    list may be empty too. `related_task_id` / `related_run_id` let agent
+    bubbles point at the Gate A run they describe so the UI can render
+    image cards inside the bubble.
+    """
+
+    __tablename__ = "messages"
+
+    message_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("conversations.conversation_id"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, default="")
+    attachments_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    related_task_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("tasks.task_id"))
+    related_run_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("runs.run_id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
