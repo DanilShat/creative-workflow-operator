@@ -173,5 +173,71 @@ def mark_orphans():
     typer.echo(f"OK: marked {count} expired leased jobs as orphaned.")
 
 
+@app.command("attach-orphans")
+def attach_orphans():
+    """Fold every pre-chat task into an 'Earlier work' conversation.
+
+    Tasks created before the chat-driven console keep `conversation_id`
+    NULL, which means they don't appear in the new left rail. This
+    command creates a single 'Earlier work' conversation and links those
+    tasks to it, seeding a synthetic agent message per task so the chat
+    has something to render. Idempotent — running it again only attaches
+    tasks that are still orphaned.
+    """
+
+    from sqlalchemy import func, select
+    from creative_workflow.server.db.models import Conversation, Message, Run, Task
+    from creative_workflow.shared.ids import new_id
+
+    settings = _settings()
+    factory = make_session_factory(settings.database_url)
+    with factory() as db:
+        orphan_count = db.scalar(
+            select(func.count(Task.task_id)).where(Task.conversation_id.is_(None))
+        ) or 0
+        if not orphan_count:
+            typer.echo("OK: no orphan tasks found.")
+            return
+        # Reuse a single 'Earlier work' conversation if it already exists.
+        conv = db.scalars(
+            select(Conversation).where(Conversation.title == "Earlier work")
+        ).first()
+        if conv is None:
+            conv = Conversation(conversation_id=new_id("conv"), title="Earlier work")
+            db.add(conv)
+            db.flush()
+        orphans = list(
+            db.scalars(
+                select(Task)
+                .where(Task.conversation_id.is_(None))
+                .order_by(Task.created_at)
+            ).all()
+        )
+        attached = 0
+        for task in orphans:
+            task.conversation_id = conv.conversation_id
+            latest_run = db.scalars(
+                select(Run).where(Run.task_id == task.task_id).order_by(Run.attempt_number.desc())
+            ).first()
+            db.add(
+                Message(
+                    message_id=new_id("msg"),
+                    conversation_id=conv.conversation_id,
+                    role="agent",
+                    content=(
+                        f"Earlier task: \"{task.title}\" "
+                        f"({task.workflow_state.replace('_', ' ')})."
+                    ),
+                    related_task_id=task.task_id,
+                    related_run_id=latest_run.run_id if latest_run else None,
+                )
+            )
+            attached += 1
+        db.commit()
+    typer.echo(
+        f"OK: attached {attached} orphan task(s) to the 'Earlier work' conversation."
+    )
+
+
 if __name__ == "__main__":
     app()

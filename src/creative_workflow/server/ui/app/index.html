@@ -387,6 +387,7 @@ const app = {
   rejecting: null,       // { runId: string, reason: string } when reject form open
   sending: false,
   lightbox: null,        // asset_id of currently-lightboxed image
+  selectedByRun: {},     // run_id -> asset_id chosen by the designer, preserved across polls
 };
 let pollTimer = null;
 function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
@@ -643,27 +644,30 @@ function appendReviewPanel(bubble, agentMsg) {
   const runId = agentMsg.related_run_id;
   const assets = (app.detail.gallery || []).filter(a => a.run_id === runId);
   if (assets.length) {
+    // Selection persists across polls; default to first if nothing chosen.
+    let selected = app.selectedByRun[runId];
+    if (!selected || !assets.some(a => a.asset_id === selected)) {
+      selected = assets[0].asset_id;
+      app.selectedByRun[runId] = selected;
+    }
     const grid = h("div", { class: "bubble-images" });
-    let selected = assets[0].asset_id;
-    const imgs = [];
     for (const a of assets) {
       const img = h("img", {
         src: assetUrl(a.asset_id), alt: "",
         class: (assets.length > 1 && a.asset_id === selected) ? "sel" : "",
       });
-      img.addEventListener("click", e => {
+      img.addEventListener("click", () => {
         if (assets.length === 1) { app.lightbox = a.asset_id; render(); return; }
-        selected = a.asset_id;
-        for (const x of imgs) x.classList.remove("sel");
-        img.classList.add("sel");
+        app.selectedByRun[runId] = a.asset_id;
+        render();
       });
-      imgs.push(img); grid.append(img);
+      grid.append(img);
     }
     bubble.append(grid);
 
     const actions = h("div", { class: "bubble-actions" },
       h("button", { class: "b-btn approve",
-        onclick: () => approveRun(runId, () => selected) }, "✓  Approve"),
+        onclick: () => approveRun(runId) }, "✓  Approve"),
       h("button", { class: "b-btn reject",
         onclick: () => { app.rejecting = { runId, reason: "" }; render(); } }, "✕  Reject"));
     bubble.append(actions);
@@ -817,12 +821,15 @@ async function send() {
   }
 }
 
-async function approveRun(runId, getSelected) {
+async function approveRun(runId) {
   if (app.sending) return;
   app.sending = true; render();
   try {
-    await API.postForm("/conversations/" + app.activeId + "/messages",
-      _formWithAction({ type: "approve", run_id: runId, selected_asset_id: getSelected() }));
+    const selected = app.selectedByRun[runId] || null;
+    await API.postForm(
+      "/conversations/" + app.activeId + "/messages",
+      _formWithAction({ type: "approve", run_id: runId, selected_asset_id: selected }, "✓ Approved"),
+    );
     await loadConversation(app.activeId);
     await loadList();
   } catch (e) { toast(e.message, "err"); }
@@ -835,8 +842,10 @@ async function rejectRun(runId, reason) {
   if (app.sending) return;
   app.sending = true; render();
   try {
-    await API.postForm("/conversations/" + app.activeId + "/messages",
-      _formWithAction({ type: "reject", run_id: runId, reason }));
+    await API.postForm(
+      "/conversations/" + app.activeId + "/messages",
+      _formWithAction({ type: "reject", run_id: runId, reason }, "✕ Rejected: " + reason),
+    );
     app.rejecting = null;
     await loadConversation(app.activeId);
     await loadList();
@@ -844,9 +853,12 @@ async function rejectRun(runId, reason) {
   finally { app.sending = false; render(); }
 }
 
-function _formWithAction(action) {
+// `text` makes the click visible as a user bubble in the thread so the
+// chat doesn't read like the agent is talking to itself.
+function _formWithAction(action, text) {
   const fd = new FormData();
   fd.append("action", JSON.stringify(action));
+  if (text) fd.append("text", text);
   return fd;
 }
 

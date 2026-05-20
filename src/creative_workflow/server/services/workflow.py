@@ -9,11 +9,36 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from creative_workflow.server.config import ServerSettings
-from creative_workflow.server.db.models import Asset, Job, Prompt, Review, Run, Task, WorkflowEvent
+from creative_workflow.server.db.models import Asset, Job, Message, Prompt, Review, Run, Task, WorkflowEvent
 from creative_workflow.server.services.local_llm import LocalLLMService
 from creative_workflow.shared.enums import AssetClass, JobState, JobType, RetentionClass, SourceService, WorkflowState
 from creative_workflow.shared.ids import new_id
 from creative_workflow.shared.time import utc_now
+
+
+def post_chat_progress(
+    db: Session, task: Task, content: str, run_id: str | None = None
+) -> Message | None:
+    """Append an agent message to a task's conversation, if it has one.
+
+    Chat-driven tasks narrate every pipeline transition so the designer's
+    thread reads like a running conversation. Tasks without a
+    `conversation_id` (the old Streamlit/API surface) are silently skipped,
+    so this helper is safe to call from any state-change site.
+    """
+
+    if not task.conversation_id:
+        return None
+    msg = Message(
+        message_id=new_id("msg"),
+        conversation_id=task.conversation_id,
+        role="agent",
+        content=content,
+        related_task_id=task.task_id,
+        related_run_id=run_id,
+    )
+    db.add(msg)
+    return msg
 
 
 GEMINI_ACTION = "gemini_build_prompt_from_brief_and_refs"
@@ -224,6 +249,12 @@ class WorkflowService:
                 "source_prompt_id": prompt.prompt_id,
                 "artifact_ids": artifact_ids,
             })
+            post_chat_progress(
+                self.db,
+                task,
+                "Prompt is ready — generating the image now…",
+                run_id=job.run_id,
+            )
             return WorkflowState.WAITING_WORKER
 
         if job.action_name == FREEPIK_ACTION:
@@ -233,6 +264,12 @@ class WorkflowService:
                 run.status = "waiting_human_review"
                 run.completed_at = utc_now()
             self._event(job.task_id, job.run_id, job.job_id, "waiting_human_review", {"artifact_ids": artifact_ids})
+            post_chat_progress(
+                self.db,
+                task,
+                "The image is ready for your review.",
+                run_id=job.run_id,
+            )
             return WorkflowState.WAITING_HUMAN_REVIEW
 
         raise ValueError(f"Unsupported Gate A completion action {job.action_name}")

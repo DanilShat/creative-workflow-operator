@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from creative_workflow.server.config import ServerSettings
 from creative_workflow.server.db.models import Asset, Job, Task, Worker, WorkflowEvent
-from creative_workflow.server.services.workflow import WorkflowService
+from creative_workflow.server.services.workflow import WorkflowService, post_chat_progress
 from creative_workflow.shared.contracts.assets import JobInputAsset
 from creative_workflow.shared.contracts.jobs import JobCompleteRequest, JobFailRequest, JobProgressRequest
 from creative_workflow.shared.contracts.workers import JobForWorker
@@ -138,6 +138,17 @@ class JobQueueService:
             task = self.db.get(Task, job.task_id)
             if task:
                 task.workflow_state = WorkflowState.FAILED.value
+                # Narrate the failure in the chat thread if this task belongs
+                # to a conversation; safe no-op for old-style tasks.
+                detail = payload.message or ""
+                post_chat_progress(
+                    self.db,
+                    task,
+                    f"That run failed: {payload.failure_type.value}"
+                    + (f" — {detail[:200]}" if detail else "")
+                    + ". Tell me what to change and I'll try again.",
+                    run_id=job.run_id,
+                )
         self._event(job, "job_failed", event_payload)
         self.db.commit()
         return JobState(job.state)
