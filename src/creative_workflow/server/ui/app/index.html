@@ -602,16 +602,24 @@ function renderBubble(m, taskById, latestAgentMsgByTask) {
   const bubble = h("div", { class: "bubble " + m.role });
 
   // user attachments shown above text
-  if (m.role === "user" && m.attachments && m.attachments.length) {
+  if (m.role === "user" && ((m.attachments && m.attachments.length) || (m._pendingFiles && m._pendingFiles.length))) {
     const grid = h("div", { class: "bubble-attachments" });
-    for (const aid of m.attachments) {
-      grid.append(h("img", { src: assetUrl(aid), alt: "",
-        onclick: () => { app.lightbox = aid; render(); } }));
+    // While optimistic, render local blob URLs; the server-confirmed
+    // bubble that replaces this one will use real asset_ids.
+    const sources = m._pendingFiles && m._pendingFiles.length
+      ? m._pendingFiles
+      : (m.attachments || []).map(assetUrl);
+    for (const src of sources) {
+      grid.append(h("img", { src, alt: "",
+        onclick: () => { app.lightbox = src; render(); } }));
     }
     bubble.append(grid);
   }
 
+  if (m.role === "user" && m._pending) bubble.style.opacity = "0.65";
+  if (m._failed) bubble.style.borderColor = "rgba(224,89,79,.55)";
   if (m.content) bubble.append(h("span", {}, m.content));
+  if (m._failed) bubble.append(h("div", { class: "bubble-status", style: { color: "var(--red)" } }, "Send failed — try again."));
 
   // agent bubble action area — show image + buttons when this is the latest
   // agent bubble for a task currently waiting on the designer.
@@ -777,40 +785,89 @@ function startNewChat() {
   render();
 }
 
+function _makeOptimisticUserMsg(text, files) {
+  return {
+    message_id: "pending_" + Date.now() + "_" + Math.random().toString(36).slice(2),
+    role: "user",
+    content: text,
+    attachments: [],
+    related_task_id: null,
+    related_run_id: null,
+    created_at: new Date().toISOString(),
+    _pending: true,
+    _pendingFiles: files.map(f => URL.createObjectURL(f)),
+  };
+}
+
 async function send() {
   const text = app.composer.text.trim();
-  const files = app.composer.files;
+  const files = app.composer.files.slice();
   if (!text && !files.length) return;
   if (app.sending) return;
-  app.sending = true; app.rejecting = null; render();
+  app.sending = true; app.rejecting = null;
 
+  // Create the conversation FIRST if this is a brand-new chat, so the
+  // sidebar shows it immediately — even if the message POST hangs the
+  // designer can still see the chat in the rail and come back to it.
   try {
     if (!app.activeId) {
       const conv = await API.post("/conversations", {});
       app.activeId = conv.conversation_id;
-      navigate("/conv/" + conv.conversation_id);
-      // ensure detail is set so render() doesn't bounce to the spinner state
       app.detail = { conversation: conv, messages: [], gallery: [], tasks: [] };
+      // Drop the new chat at the top of the sidebar right now.
+      app.conversations = [
+        conv,
+        ...app.conversations.filter(c => c.conversation_id !== conv.conversation_id),
+      ];
+      navigate("/conv/" + conv.conversation_id);
     }
+  } catch (e) {
+    toast(e.message || "could not create chat", "err");
+    app.sending = false;
+    render();
+    return;
+  }
 
+  // Optimistically render the user's bubble before the server confirms,
+  // so the thread reflects what was just typed without waiting on the LLM.
+  const optimistic = _makeOptimisticUserMsg(text, files);
+  app.detail.messages.push(optimistic);
+  app.composer = { text: "", files: [] };
+  render();
+
+  try {
     const fd = new FormData();
     if (text) fd.append("text", text);
     for (const f of files) fd.append("attachments", f, f.name);
 
-    const result = await API.postForm("/conversations/" + app.activeId + "/messages", fd);
+    const result = await API.postForm(
+      "/conversations/" + app.activeId + "/messages", fd
+    );
 
-    app.composer = { text: "", files: [] };
-    // patch detail with the two new messages (optimistic)
+    // Swap the optimistic placeholder for the server-confirmed pair.
+    _purgePendingMessages();
     if (result.user_message) app.detail.messages.push(result.user_message);
     if (result.agent_message) app.detail.messages.push(result.agent_message);
-    // reload sidebar + detail fully — message endpoint may have started a task
+
     await Promise.all([loadConversation(app.activeId), loadList()]);
   } catch (e) {
+    // Keep the bubble in the thread, but mark it as failed so the
+    // designer sees exactly what didn't go through.
+    const failed = app.detail.messages.find(m => m._pending);
+    if (failed) { failed._pending = false; failed._failed = true; }
     toast(e.message || "send failed", "err");
   } finally {
     app.sending = false;
     render();
   }
+}
+
+function _purgePendingMessages() {
+  if (!app.detail) return;
+  for (const m of app.detail.messages) {
+    if (m._pendingFiles) for (const url of m._pendingFiles) URL.revokeObjectURL(url);
+  }
+  app.detail.messages = app.detail.messages.filter(m => !m._pending);
 }
 
 async function approveRun(runId) {
@@ -899,7 +956,12 @@ async function loadHiddenList() {
 }
 async function loadConversation(id) {
   try {
-    app.detail = await API.get("/conversations/" + id);
+    const fresh = await API.get("/conversations/" + id);
+    // Preserve any in-flight optimistic messages so a 3.5s poll mid-send
+    // doesn't blank out the bubble the designer just typed.
+    const pending = (app.detail && app.detail.messages || []).filter(m => m._pending || m._failed);
+    app.detail = fresh;
+    if (pending.length) app.detail.messages.push(...pending);
   } catch (e) {
     app.detail = null;
     toast(e.message || "could not load chat", "err");
@@ -962,8 +1024,10 @@ function render() {
   clear(root);
   root.append(renderSidebar(), renderMain());
   if (app.lightbox) {
+    const src = (app.lightbox.startsWith("blob:") || app.lightbox.startsWith("http"))
+      ? app.lightbox : assetUrl(app.lightbox);
     const lb = h("div", { class: "lightbox", onclick: () => { app.lightbox = null; render(); } },
-      h("img", { src: assetUrl(app.lightbox), alt: "" }));
+      h("img", { src, alt: "" }));
     document.body.append(lb);
     // remove the previous lightbox node next render
     const lbs = document.querySelectorAll(".lightbox");
