@@ -6,12 +6,12 @@
 <link rel="icon" href="data:," />
 <title>Creative Workflow — Operator Console</title>
 <style>
-/* ============================ design system ============================ */
+/* =========================== design tokens ============================ */
 :root {
   --bg: #0d0e12; --bg-2: #14161d; --bg-3: #1b1e27; --bg-hover: #20242f;
   --border: #282b36; --border-soft: #20222c;
   --text: #e7e8ec; --text-dim: #969aa6; --text-faint: #6b6f7c;
-  --accent: #6d8bff;
+  --accent: #6d8bff; --accent-soft: rgba(109,139,255,.15);
   --amber: #e5a13a; --blue: #5b9bd5; --green: #43b888; --red: #e0594f; --gray: #6b7280;
   --shadow: 0 6px 24px rgba(0,0,0,.35);
   --radius: 14px; --radius-sm: 9px;
@@ -20,6 +20,7 @@ body.light {
   --bg: #f4f5f7; --bg-2: #ffffff; --bg-3: #fbfbfc; --bg-hover: #eef0f3;
   --border: #e2e4e9; --border-soft: #ecedf1;
   --text: #1c1f27; --text-dim: #5d626e; --text-faint: #9097a3;
+  --accent-soft: rgba(109,139,255,.13);
   --shadow: 0 6px 22px rgba(20,24,40,.10);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -28,221 +29,272 @@ body {
   font-family: "Inter", -apple-system, "Segoe UI", Roboto, sans-serif;
   background: var(--bg); color: var(--text);
   font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  overflow: hidden;
 }
-#root { display: flex; min-height: 100vh; }
 a { color: inherit; text-decoration: none; }
 button { font-family: inherit; cursor: pointer; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bg-hover); }
 
-/* ============================ sidebar ============================ */
+#root { display: flex; height: 100vh; }
+
+/* ================================ sidebar ============================= */
 .sidebar {
-  width: 232px; flex-shrink: 0; background: var(--bg-2);
-  border-right: 1px solid var(--border); display: flex; flex-direction: column;
-  padding: 18px 14px; position: sticky; top: 0; height: 100vh;
+  width: 280px; flex-shrink: 0; background: var(--bg-2);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  height: 100vh;
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 18px; }
+.sb-head { padding: 16px 14px 8px; }
+.brand { display: flex; align-items: center; gap: 10px; }
 .brand .mark {
-  width: 28px; height: 28px; border-radius: 8px;
+  width: 26px; height: 26px; border-radius: 7px;
   background: linear-gradient(135deg, var(--accent), #9a6dff);
 }
-.brand .name { font-weight: 650; font-size: 14.5px; letter-spacing: .2px; }
+.brand .name { font-weight: 650; font-size: 14px; letter-spacing: .2px; }
 .brand .sub { font-size: 11px; color: var(--text-faint); }
-.nav { display: flex; flex-direction: column; gap: 2px; }
-.nav-item {
-  display: flex; align-items: center; gap: 10px; padding: 9px 10px;
-  border-radius: var(--radius-sm); color: var(--text-dim); font-weight: 500;
-  transition: background .12s, color .12s;
+.new-chat-btn {
+  margin: 10px 14px 6px; padding: 10px 12px;
+  background: var(--accent); color: #fff; border: none;
+  border-radius: var(--radius-sm); font-weight: 600; font-size: 13.5px;
+  display: flex; align-items: center; gap: 8px; justify-content: center;
+  transition: background .12s;
 }
-.nav-item:hover { background: var(--bg-hover); color: var(--text); }
-.nav-item.active { background: var(--bg-3); color: var(--text); }
-.nav-item.active .ic { color: var(--accent); }
-.ic { width: 17px; text-align: center; opacity: .9; }
-.nav-spacer { flex: 1; }
-.sys-card {
-  background: var(--bg-3); border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm); padding: 11px 12px; font-size: 12px;
+.new-chat-btn:hover { background: #5d7cf5; }
+.chats-scroll {
+  flex: 1; overflow-y: auto; padding: 6px 8px 6px;
+}
+.chat-item {
+  position: relative; padding: 9px 12px; border-radius: var(--radius-sm);
+  cursor: pointer; margin-bottom: 2px;
+  display: flex; flex-direction: column; gap: 2px;
+  transition: background .1s;
+}
+.chat-item:hover { background: var(--bg-hover); }
+.chat-item.active { background: var(--bg-3); border-left: 3px solid var(--accent); padding-left: 9px; }
+.chat-item.hidden-row { opacity: .55; }
+.chat-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.chat-title { font-weight: 600; font-size: 13.3px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-time { font-size: 10.5px; color: var(--text-faint); flex-shrink: 0; }
+.chat-preview { font-size: 12px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-icon-btn {
+  position: absolute; right: 6px; top: 6px;
+  width: 22px; height: 22px; border-radius: 6px;
+  background: transparent; border: none; color: var(--text-faint);
+  display: none; align-items: center; justify-content: center; font-size: 13px;
+}
+.chat-item:hover .chat-icon-btn { display: inline-flex; }
+.chat-icon-btn:hover { background: var(--border); color: var(--text); }
+
+.sb-divider { margin: 6px 14px; border-top: 1px solid var(--border-soft); }
+.sb-toggle-row {
+  padding: 6px 14px; display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 12px; color: var(--text-dim);
+}
+.sb-toggle-row:hover { color: var(--text); }
+.sb-toggle-row .chev { font-size: 10px; opacity: .7; }
+
+.sb-foot {
+  padding: 10px 14px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 6px; font-size: 12px;
 }
 .sys-row { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
-.sys-row + .sys-row { margin-top: 6px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--gray); }
 .dot.green { background: var(--green); } .dot.red { background: var(--red); }
 .dot.amber { background: var(--amber); }
 .theme-btn {
-  margin-top: 10px; width: 100%; background: transparent; color: var(--text-dim);
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 7px; font-size: 12px;
+  margin-top: 4px; background: transparent; color: var(--text-faint);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px; font-size: 11px;
 }
 .theme-btn:hover { background: var(--bg-hover); color: var(--text); }
 
-/* ============================ main ============================ */
-.main { flex: 1; min-width: 0; }
-.content { max-width: 1180px; margin: 0 auto; padding: 30px 36px 60px; }
-.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
-.page-title { font-size: 21px; font-weight: 650; letter-spacing: -.2px; }
-.page-sub { color: var(--text-dim); margin-top: 3px; font-size: 13px; }
-
-/* buttons */
-.btn {
-  display: inline-flex; align-items: center; gap: 7px; padding: 9px 15px;
-  border-radius: var(--radius-sm); border: 1px solid var(--border);
-  background: var(--bg-3); color: var(--text); font-weight: 550; font-size: 13px;
-  transition: background .12s, border-color .12s, transform .04s;
+/* ================================ main thread ========================= */
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.thread-head {
+  padding: 14px 24px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; min-height: 56px;
 }
-.btn:hover { background: var(--bg-hover); }
-.btn:active { transform: translateY(1px); }
-.btn:disabled { opacity: .45; cursor: not-allowed; }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn-primary:hover { background: #5d7cf5; }
-.btn-green { background: var(--green); border-color: var(--green); color: #06281c; }
-.btn-green:hover { filter: brightness(1.07); }
-.btn-danger { background: transparent; border-color: var(--red); color: var(--red); }
-.btn-danger:hover { background: rgba(224,89,79,.12); }
-.btn-sm { padding: 6px 11px; font-size: 12px; }
+.thread-head .title { font-weight: 650; font-size: 15px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thread-head .actions { margin-left: auto; display: flex; gap: 6px; }
+.head-btn {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-dim); border-radius: 7px; padding: 6px 10px; font-size: 12px;
+}
+.head-btn:hover { background: var(--bg-hover); color: var(--text); }
 
-/* cards */
-.card {
+.thread-body {
+  flex: 1; overflow-y: auto; padding: 28px 24px 20px;
+  display: flex; flex-direction: column; gap: 14px;
+  scroll-behavior: smooth;
+}
+.thread-inner { max-width: 820px; width: 100%; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 14px; }
+
+/* bubbles */
+.bubble {
+  padding: 11px 14px; border-radius: 14px;
+  font-size: 13.8px; line-height: 1.55; white-space: pre-wrap;
+  max-width: 80%; word-wrap: break-word;
+}
+.row { display: flex; gap: 8px; }
+.row.user { justify-content: flex-end; }
+.row.agent { justify-content: flex-start; }
+.row.system { justify-content: center; }
+.bubble.user { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+.bubble.agent { background: var(--bg-2); border: 1px solid var(--border);
+  border-bottom-left-radius: 4px; }
+.bubble.system { background: transparent; color: var(--text-faint);
+  font-size: 12px; font-style: italic; max-width: 100%; text-align: center; }
+
+.bubble-images { margin-top: 10px; display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.bubble-images img { width: 100%; aspect-ratio: 4/5; object-fit: cover;
+  border-radius: 8px; border: 2px solid transparent; cursor: pointer; background: var(--bg-3); }
+.bubble-images img:hover { border-color: var(--border); }
+.bubble-images img.sel { border-color: var(--accent); }
+.bubble-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+.b-btn {
+  padding: 6px 12px; border-radius: 7px; border: 1px solid var(--border);
+  background: var(--bg-3); color: var(--text); font-size: 12.5px; font-weight: 550;
+}
+.b-btn:hover { background: var(--bg-hover); }
+.b-btn:disabled { opacity: .5; cursor: not-allowed; }
+.b-btn.approve { background: var(--green); border-color: var(--green); color: #04231a; }
+.b-btn.approve:hover { filter: brightness(1.08); }
+.b-btn.reject { color: var(--red); border-color: rgba(224,89,79,.45); background: transparent; }
+.b-btn.reject:hover { background: rgba(224,89,79,.12); }
+
+.bubble-status { margin-top: 8px; font-size: 11.5px; color: var(--text-faint);
+  display: flex; align-items: center; gap: 6px; }
+.bubble-status .pulse {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--amber);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(229,161,58,.4); } 50% { box-shadow: 0 0 0 7px rgba(229,161,58,0); } }
+
+.reject-form { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.reject-form textarea {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit;
+  resize: vertical; min-height: 60px;
+}
+.reject-form textarea:focus { outline: none; border-color: var(--accent); }
+
+.fail-card { margin-top: 8px; padding: 8px 12px; border-radius: 7px;
+  background: rgba(224,89,79,.12); border: 1px solid rgba(224,89,79,.35);
+  color: #f0a39c; font-size: 12.5px; }
+
+.bubble-attachments { display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 6px;
+  margin-bottom: 8px; }
+.bubble-attachments img { width: 100%; aspect-ratio: 1/1; object-fit: cover;
+  border-radius: 6px; background: var(--bg-3); }
+
+/* composer */
+.composer {
+  border-top: 1px solid var(--border); padding: 14px 24px 18px; background: var(--bg);
+}
+.composer-inner { max-width: 820px; margin: 0 auto; }
+.attached-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.attached-chip {
+  display: flex; align-items: center; gap: 8px;
   background: var(--bg-2); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
+  border-radius: 8px; padding: 4px 4px 4px 8px; font-size: 12px;
 }
-.card + .card { margin-top: 16px; }
-.card-title { font-size: 13px; font-weight: 600; color: var(--text-dim);
-  text-transform: uppercase; letter-spacing: .6px; margin-bottom: 12px; }
+.attached-chip img { width: 32px; height: 32px; object-fit: cover; border-radius: 5px; }
+.attached-chip .x { width: 20px; height: 20px; display: inline-flex; align-items: center;
+  justify-content: center; border-radius: 4px; color: var(--text-faint); cursor: pointer; }
+.attached-chip .x:hover { background: var(--border); color: var(--text); }
 
-/* pills */
-.pill {
-  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
-  border-radius: 999px; font-size: 11.5px; font-weight: 600;
-  border: 1px solid transparent;
+.composer-box {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 12px;
+  padding: 8px 8px 8px 12px; display: flex; align-items: flex-end; gap: 6px;
+  transition: border-color .12s, background .12s;
 }
-.pill .pdot { width: 6px; height: 6px; border-radius: 50%; }
-.pill.gray  { background: rgba(107,114,128,.14); color: #aab; border-color: rgba(107,114,128,.3); }
-.pill.amber { background: rgba(229,161,58,.13); color: var(--amber); border-color: rgba(229,161,58,.32); }
-.pill.blue  { background: rgba(91,155,213,.13); color: var(--blue); border-color: rgba(91,155,213,.32); }
-.pill.green { background: rgba(67,184,136,.13); color: var(--green); border-color: rgba(67,184,136,.32); }
-.pill.red   { background: rgba(224,89,79,.13); color: var(--red); border-color: rgba(224,89,79,.34); }
-.pill.gray .pdot{background:var(--gray)} .pill.amber .pdot{background:var(--amber)}
-.pill.blue .pdot{background:var(--blue)} .pill.green .pdot{background:var(--green)}
-.pill.red .pdot{background:var(--red)}
-
-/* inputs */
-label.fld { display: block; margin-bottom: 14px; }
-.fld-label { font-size: 12.5px; font-weight: 550; color: var(--text-dim); margin-bottom: 6px; }
-.input, .textarea, select.input {
-  width: 100%; background: var(--bg); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 10px 12px; font-size: 13.5px; font-family: inherit;
+.composer-box.dragover { border-color: var(--accent); background: var(--accent-soft); }
+.composer-box textarea {
+  flex: 1; background: transparent; color: var(--text);
+  border: none; outline: none; resize: none; font-family: inherit;
+  font-size: 14px; padding: 6px 0 6px; min-height: 24px; max-height: 200px;
+  line-height: 1.5;
 }
-.input:focus, .textarea:focus, select.input:focus { outline: none; border-color: var(--accent); }
-.textarea { resize: vertical; min-height: 90px; line-height: 1.55; }
-
-/* gallery grid */
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 16px; }
-.tcard {
-  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
-  overflow: hidden; transition: transform .1s, border-color .12s; cursor: pointer;
+.icon-btn {
+  width: 34px; height: 34px; border-radius: 8px;
+  background: transparent; border: none; color: var(--text-dim);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 17px;
 }
-.tcard:hover { transform: translateY(-2px); border-color: #3a3e4c; }
-.thumb { aspect-ratio: 4/5; width: 100%; object-fit: cover; display: block; background: var(--bg-3); }
-.thumb-ph { aspect-ratio: 4/5; display: flex; align-items: center; justify-content: center;
-  color: rgba(255,255,255,.5); font-size: 26px; }
-.tcard-body { padding: 12px 13px 13px; }
-.tcard-title { font-weight: 600; font-size: 13.5px; margin-bottom: 8px;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tcard-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; }
-.tcard-time { font-size: 11px; color: var(--text-faint); }
-
-/* filter chips */
-.chips { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 20px; }
-.chip {
-  padding: 6px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 550;
-  background: var(--bg-2); border: 1px solid var(--border); color: var(--text-dim);
+.icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+.send-btn {
+  width: 34px; height: 34px; border-radius: 8px;
+  background: var(--accent); border: none; color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px;
 }
-.chip:hover { color: var(--text); }
-.chip.on { background: var(--bg-3); color: var(--text); border-color: #3c4150; }
+.send-btn:hover { background: #5d7cf5; }
+.send-btn:disabled { opacity: .4; cursor: not-allowed; background: var(--accent); }
 
-/* pipeline */
-.pipeline { display: flex; align-items: stretch; gap: 0; }
-.stage { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; position: relative; }
-.stage .conn { position: absolute; top: 21px; height: 2px; background: var(--border); z-index: 0; }
-.stage .conn.left { left: 0; right: 50%; } .stage .conn.right { left: 50%; right: 0; }
-.stage .conn.fill { background: var(--green); }
-.stage:first-child .conn.left, .stage:last-child .conn.right { display: none; }
-.node {
-  width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center;
-  justify-content: center; font-size: 18px; z-index: 1;
-  border: 2px solid var(--border); background: var(--bg-3); color: var(--text-faint);
+.composer-help {
+  font-size: 11px; color: var(--text-faint); margin-top: 7px; text-align: center;
 }
-.node.done { border-color: var(--green); background: rgba(67,184,136,.16); color: var(--green); }
-.node.running { border-color: var(--amber); background: rgba(229,161,58,.16); color: var(--amber);
-  animation: pulse 1.6s ease-in-out infinite; }
-.node.failed { border-color: var(--red); background: rgba(224,89,79,.16); color: var(--red); }
-@keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(229,161,58,.4)} 50%{box-shadow:0 0 0 7px rgba(229,161,58,0)} }
-.stage-name { font-weight: 600; font-size: 12.5px; margin-top: 9px; }
-.stage-sub { font-size: 11px; color: var(--text-faint); margin-top: 2px; max-width: 150px; }
 
-/* timeline */
-.tl-item { display: flex; gap: 11px; padding: 7px 0; }
-.tl-item:not(:last-child) { border-bottom: 1px solid var(--border-soft); }
-.tl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-top: 6px; flex-shrink: 0; }
-.tl-body { flex: 1; min-width: 0; }
-.tl-text { font-size: 13px; }
-.tl-time { font-size: 11px; color: var(--text-faint); margin-top: 1px; }
+/* gallery strip — small thumbs at top of thread */
+.gallery-strip {
+  display: flex; gap: 8px; padding: 6px 0 14px;
+  border-bottom: 1px solid var(--border-soft); margin-bottom: 18px;
+  overflow-x: auto;
+}
+.gallery-strip img { height: 64px; width: auto; border-radius: 6px;
+  cursor: pointer; background: var(--bg-3); flex-shrink: 0; }
+.gallery-strip img:hover { outline: 2px solid var(--accent); }
 
-/* banners */
-.banner { padding: 13px 15px; border-radius: var(--radius-sm); font-size: 13px; }
-.banner.red { background: rgba(224,89,79,.1); border: 1px solid rgba(224,89,79,.3); color: #f0a39c; }
-.banner.amber { background: rgba(229,161,58,.1); border: 1px solid rgba(229,161,58,.3); color: #e8c489; }
-.banner.blue { background: rgba(91,155,213,.1); border: 1px solid rgba(91,155,213,.3); color: #a9cce8; }
-
-/* misc */
-.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.between { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.muted { color: var(--text-dim); }
-.faint { color: var(--text-faint); font-size: 12px; }
-.imgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap: 11px; }
-.imgrid img { width: 100%; aspect-ratio: 4/5; object-fit: cover; border-radius: var(--radius-sm);
-  border: 2px solid transparent; cursor: pointer; background: var(--bg-3); }
-.imgrid img.sel { border-color: var(--accent); }
-.empty { text-align: center; padding: 70px 20px; color: var(--text-dim); }
-.empty .big { font-size: 34px; margin-bottom: 12px; }
-.spinner { width: 30px; height: 30px; border: 3px solid var(--border);
-  border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; margin: 50px auto; }
+/* empty / loading / error states */
+.center-state {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; text-align: center; color: var(--text-dim); gap: 14px;
+  padding: 40px;
+}
+.center-state .big { font-size: 38px; }
+.center-state .head { font-size: 18px; font-weight: 600; color: var(--text); }
+.spinner { width: 28px; height: 28px; border: 3px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.prompt-box { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 13px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; color: var(--text-dim); }
-.backlink { color: var(--text-dim); font-size: 13px; margin-bottom: 12px; display: inline-block; }
-.backlink:hover { color: var(--text); }
-
-/* chat */
-.chat-wrap { display: flex; flex-direction: column; height: calc(100vh - 60px); max-width: 760px; margin: 0 auto; }
-.chat-thread { flex: 1; overflow-y: auto; padding: 26px 0; display: flex; flex-direction: column; gap: 14px; }
-.msg { max-width: 75%; padding: 11px 14px; border-radius: 14px; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; }
-.msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
-.msg.bot { align-self: flex-start; background: var(--bg-2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-.msg.sys { align-self: center; background: transparent; color: var(--text-faint); font-size: 12px; }
-.chat-input { display: flex; gap: 9px; padding: 14px 0 18px; border-top: 1px solid var(--border); }
 
 /* toasts */
-#toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 9px; z-index: 99; }
-.toast { padding: 11px 15px; border-radius: var(--radius-sm); font-size: 13px; box-shadow: var(--shadow);
-  background: var(--bg-3); border: 1px solid var(--border); animation: rise .2s ease; max-width: 340px; }
+#toasts { position: fixed; bottom: 20px; right: 20px;
+  display: flex; flex-direction: column; gap: 9px; z-index: 99; }
+.toast {
+  padding: 10px 14px; border-radius: var(--radius-sm); font-size: 13px;
+  box-shadow: var(--shadow); background: var(--bg-3);
+  border: 1px solid var(--border); max-width: 340px;
+}
 .toast.err { border-color: rgba(224,89,79,.45); color: #f0a39c; }
 .toast.ok { border-color: rgba(67,184,136,.45); color: #8fdab9; }
-@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+.lightbox {
+  position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 200;
+  display: flex; align-items: center; justify-content: center; padding: 30px;
+}
+.lightbox img { max-width: 100%; max-height: 100%; border-radius: 10px; }
 </style>
 </head>
 <body>
 <div id="root"></div>
 <div id="toasts"></div>
+
 <script>
 "use strict";
-/* ======================================================================
-   Creative Workflow — Operator Console
-   Single-file vanilla SPA, served same-origin by the FastAPI operator.
-   ====================================================================== */
+/* =========================================================================
+   Creative Workflow Operator Console — chat-first SPA
+   Vanilla JS, single file, served same-origin by the operator at /app/.
+   ========================================================================= */
 
-/* ----------------------------- helpers ------------------------------- */
+/* ------------------------------ helpers ---------------------------------- */
 function h(tag, attrs) {
   const e = document.createElement(tag);
   if (attrs) for (const k in attrs) {
@@ -264,20 +316,17 @@ function h(tag, attrs) {
   return e;
 }
 function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
-function navigate(hash) { location.hash = hash; }
 
 function timeAgo(iso) {
   if (!iso) return "";
-  const d = new Date(iso), s = (Date.now() - d.getTime()) / 1000;
-  if (s < 60) return "just now";
-  if (s < 3600) return Math.floor(s/60) + "m ago";
-  if (s < 86400) return Math.floor(s/3600) + "h ago";
-  if (s < 604800) return Math.floor(s/86400) + "d ago";
-  return d.toLocaleDateString();
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return "now";
+  if (s < 3600) return Math.floor(s/60) + "m";
+  if (s < 86400) return Math.floor(s/3600) + "h";
+  if (s < 604800) return Math.floor(s/86400) + "d";
+  return new Date(iso).toLocaleDateString();
 }
 function assetUrl(id) { return "/api/v1/assets/" + id + "/download"; }
-function hue(str) { let n = 0; for (const c of String(str)) n = (n*31 + c.charCodeAt(0)) % 360; return n; }
-
 function toast(msg, kind) {
   const t = h("div", { class: "toast " + (kind || "") }, msg);
   document.getElementById("toasts").append(t);
@@ -285,7 +334,7 @@ function toast(msg, kind) {
   setTimeout(() => t.remove(), 4600);
 }
 
-/* ------------------------------- API --------------------------------- */
+/* ------------------------------- API ------------------------------------- */
 async function apiErr(r) {
   let detail;
   try { detail = await r.json(); } catch { detail = null; }
@@ -302,7 +351,16 @@ const API = {
   async get(p)  { const r = await fetch("/api/v1" + p); if (!r.ok) throw await apiErr(r); return r.json(); },
   async post(p, body) {
     const r = await fetch("/api/v1" + p, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    if (!r.ok) throw await apiErr(r);
+    return r.json();
+  },
+  async patch(p, body) {
+    const r = await fetch("/api/v1" + p, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
     });
     if (!r.ok) throw await apiErr(r);
     return r.json();
@@ -313,717 +371,537 @@ const API = {
     return r.json();
   },
 };
-async function sha256Hex(buf) {
-  if (!(window.crypto && crypto.subtle)) {
-    throw new Error("Uploads need a secure context — open the console at http://127.0.0.1:8000/app/ on the server machine.");
-  }
-  const digest = await crypto.subtle.digest("SHA-256", buf);
-  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
-}
 
-/* ---------------------------- workflow ------------------------------- */
-const GEMINI_ACTION = "gemini_build_prompt_from_brief_and_refs";
-const FREEPIK_ACTION = "freepik_generate_image_from_prompt";
+/* ----------------------------- app state -------------------------------- */
 const ACTIVE_STATES = ["waiting_worker", "running_worker_job", "retry_requested"];
-const STATE_META = {
-  draft:                { label: "Draft",          color: "gray"  },
-  waiting_worker:       { label: "In progress",    color: "amber" },
-  running_worker_job:   { label: "Working",        color: "amber" },
-  retry_requested:      { label: "Retrying",       color: "amber" },
-  waiting_human_review: { label: "Needs review",   color: "blue"  },
-  human_approved:       { label: "Approved",       color: "green" },
-  human_rejected:       { label: "Rejected",       color: "red"   },
-  agent_replied:        { label: "Agent replied",  color: "blue"  },
-  failed:               { label: "Failed",         color: "red"   },
-};
-function stateMeta(s) { return STATE_META[s] || { label: s || "unknown", color: "gray" }; }
-function pill(state) {
-  const m = stateMeta(state);
-  return h("span", { class: "pill " + m.color }, h("span", { class: "pdot" }), m.label);
-}
-const TERMINAL_JOB = ["completed", "failed_fatal", "failed_retryable", "cancelled", "orphaned"];
 
-function stageStatus(jobs) {
-  if (!jobs.length) return { s: "pending", sub: "Not started" };
-  const sorted = [...jobs].sort((a,b) => String(a.created_at).localeCompare(String(b.created_at)));
-  if (sorted.some(j => j.state === "completed")) return { s: "done", sub: "Completed" };
-  const last = sorted[sorted.length - 1];
-  if (["failed_fatal","failed_retryable","orphaned","cancelled"].includes(last.state)) {
-    return { s: "failed", sub: (last.failure_type || last.state || "failed").replace(/_/g," ") };
-  }
-  return { s: "running", sub: (last.state || "running").replace(/_/g," ") };
-}
-function humanizeEvent(ev) {
-  const p = ev.payload_json || {};
-  switch (ev.event_type) {
-    case "task_created":        return "Task created";
-    case "gate_a_started":      return "Gate A started — " + (p.variant_count || 1) + " variant(s)";
-    case "job_claimed":         return "Worker claimed a job";
-    case "job_progress":        return (p.step || "step") + ": " + (p.message || p.state || "");
-    case "freepik_job_created": return "Gemini prompt ready — Freepik image job created";
-    case "job_completed":       return "Job completed";
-    case "waiting_human_review":return "Image ready for your review";
-    case "job_failed":          return "Job failed — " + (p.failure_type || "") + " " + (p.message || "");
-    case "job_orphaned":        return "Job lease expired (orphaned)";
-    case "job_retry_enqueued":  return "Retry attempt enqueued";
-    case "human_approved":      return "You approved the result";
-    case "human_rejected":      return "You rejected the result" + (p.reason ? " — " + p.reason : "");
-    case "retry_requested":     return "Retry requested" + (p.repair_instruction ? " — " + p.repair_instruction : "");
-    case "agent_chat_requested":return "Agent chat sent to worker";
-    case "agent_chat_completed":return "Agent replied";
-    default:                    return (ev.event_type || "event").replace(/_/g, " ");
-  }
-}
-
-/* ---------------------------- app state ------------------------------ */
 const app = {
-  health: null, workers: [],
-  galleryFilter: "all",
-  forms: {},          // transient form values, survive re-renders
-  chat: [],
-  detailSig: null,    // change-detection signature for the detail screen
+  conversations: [],     // visible (not hidden) summaries
+  hiddenConvs: [],       // hidden summaries (lazy-loaded)
+  showHidden: false,
+  activeId: null,        // null = new chat (no conv created yet)
+  detail: null,          // currently loaded ConversationDetailResponse
+  health: null,
+  workers: [],
+  composer: { text: "", files: [] },
+  rejecting: null,       // { runId: string, reason: string } when reject form open
+  sending: false,
+  lightbox: null,        // asset_id of currently-lightboxed image
 };
 let pollTimer = null;
 function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 function startPoll(fn, ms) { stopPoll(); pollTimer = setInterval(fn, ms); }
 
-/* ------------------------------ shell -------------------------------- */
-function navItem(icon, label, hash, route) {
-  return h("a", { class: "nav-item" + (route === hash ? " active" : ""), href: "#" + hash },
-    h("span", { class: "ic" }, icon), label);
+/* ------------------------------ routing --------------------------------- */
+function parseRoute() {
+  const raw = (location.hash || "#/").replace(/^#/, "");
+  if (raw.startsWith("/conv/")) return { name: "conv", id: raw.slice(6) };
+  return { name: "home" };
 }
-function renderShell(route) {
-  const onlineWorkers = app.workers.filter(w => w.status !== "offline").length;
+function navigate(hash) { location.hash = hash; }
+
+/* ========================== SIDEBAR ====================================== */
+function renderSidebar() {
+  const r = parseRoute();
+  const activeId = r.name === "conv" ? r.id : (app.activeId || null);
+  const onlineWorkers = (app.workers || []).filter(w => {
+    if (!w.last_heartbeat_at) return false;
+    return (Date.now() - new Date(w.last_heartbeat_at).getTime()) < 60000;
+  }).length;
   const healthOk = app.health && app.health.ok;
-  return h("aside", { class: "sidebar" },
-    h("div", { class: "brand" },
-      h("div", { class: "mark" }),
-      h("div", {},
-        h("div", { class: "name" }, "Creative Workflow"),
-        h("div", { class: "sub" }, "Operator Console"))),
-    h("nav", { class: "nav" },
-      navItem("▦", "Gallery", "/", route),
-      navItem("✚", "New brief", "/new", route),
-      navItem("💬", "Chat", "/chat", route),
-      navItem("⚙", "System", "/system", route)),
-    h("div", { class: "nav-spacer" }),
-    h("div", { class: "sys-card" },
-      h("div", { class: "sys-row" },
-        h("span", { class: "dot " + (healthOk ? "green" : "red") }),
-        healthOk ? "Operator online" : "Operator unreachable"),
-      h("div", { class: "sys-row" },
-        h("span", { class: "dot " + (onlineWorkers ? "green" : "amber") }),
-        onlineWorkers + " worker" + (onlineWorkers === 1 ? "" : "s") + " online")),
-    h("button", { class: "theme-btn", onclick: toggleTheme }, "Toggle theme"));
+
+  const sidebar = h("aside", { class: "sidebar" });
+  sidebar.append(
+    h("div", { class: "sb-head" },
+      h("div", { class: "brand" },
+        h("div", { class: "mark" }),
+        h("div", {},
+          h("div", { class: "name" }, "Creative Workflow"),
+          h("div", { class: "sub" }, "Operator Console")))),
+    h("button", { class: "new-chat-btn", onclick: startNewChat },
+      h("span", {}, "✚"), h("span", {}, "New chat")));
+
+  const list = h("div", { class: "chats-scroll" });
+
+  if (!app.conversations.length && !app.showHidden) {
+    list.append(h("div", { style: { padding: "16px 12px", color: "var(--text-faint)", fontSize: "12px" } },
+      "No chats yet. Click ✚ New chat to start one."));
+  }
+  for (const c of app.conversations) {
+    list.append(renderChatItem(c, activeId, false));
+  }
+
+  // hidden section
+  const hiddenCount = app.hiddenConvs.length;
+  if (hiddenCount > 0 || app.showHidden) {
+    list.append(h("div", { class: "sb-divider" }));
+    list.append(h("div", {
+      class: "sb-toggle-row",
+      onclick: toggleShowHidden,
+    },
+      h("span", { class: "chev" }, app.showHidden ? "▾" : "▸"),
+      h("span", {}, app.showHidden ? "Hide hidden" : `Show hidden (${hiddenCount})`)));
+    if (app.showHidden) {
+      if (!hiddenCount) {
+        list.append(h("div", { style: { padding: "8px 12px", color: "var(--text-faint)", fontSize: "12px" } },
+          "No hidden chats."));
+      }
+      for (const c of app.hiddenConvs) {
+        list.append(renderChatItem(c, activeId, true));
+      }
+    }
+  }
+
+  sidebar.append(list);
+
+  sidebar.append(h("div", { class: "sb-foot" },
+    h("div", { class: "sys-row" },
+      h("span", { class: "dot " + (healthOk ? "green" : "red") }),
+      healthOk ? "Operator online" : "Operator unreachable"),
+    h("div", { class: "sys-row" },
+      h("span", { class: "dot " + (onlineWorkers ? "green" : "amber") }),
+      `${onlineWorkers} worker${onlineWorkers === 1 ? "" : "s"} online`),
+    h("button", { class: "theme-btn", onclick: toggleTheme }, "Toggle theme")));
+
+  return sidebar;
 }
+
+function renderChatItem(c, activeId, isHidden) {
+  const item = h("div", {
+    class: "chat-item" + (c.conversation_id === activeId ? " active" : "") + (isHidden ? " hidden-row" : ""),
+    onclick: e => {
+      if (e.target.closest(".chat-icon-btn")) return;
+      navigate("/conv/" + c.conversation_id);
+    },
+  });
+  item.append(
+    h("div", { class: "chat-title-row" },
+      h("span", { class: "chat-title" }, c.title || "Untitled"),
+      h("span", { class: "chat-time" }, timeAgo(c.last_message_at || c.updated_at))));
+  if (c.last_message_preview) {
+    item.append(h("div", { class: "chat-preview" }, c.last_message_preview));
+  }
+  const btn = h("button", {
+    class: "chat-icon-btn",
+    title: isHidden ? "Restore" : "Hide",
+    onclick: e => {
+      e.stopPropagation();
+      if (isHidden) restoreChat(c.conversation_id);
+      else hideChat(c.conversation_id);
+    },
+  }, isHidden ? "↺" : "×");
+  item.append(btn);
+  return item;
+}
+
 function toggleTheme() {
   document.body.classList.toggle("light");
   try { localStorage.setItem("cw_theme", document.body.classList.contains("light") ? "light" : "dark"); } catch {}
 }
+function toggleShowHidden() {
+  app.showHidden = !app.showHidden;
+  if (app.showHidden && !app.hiddenConvs.length) loadHiddenList();
+  render();
+}
 
-/* ============================ SCREENS ================================ */
+/* ========================== MAIN AREA ==================================== */
+function renderMain() {
+  const r = parseRoute();
+  const main = h("main", { class: "main" });
 
-/* ------------------------------ gallery ------------------------------ */
-async function screenGallery(content) {
-  content.append(h("div", { class: "spinner" }));
-  let tasks;
-  try { tasks = await API.get("/tasks"); }
-  catch (e) { clear(content); content.append(errorState(e, () => render())); return; }
-
-  async function refresh() {
-    try {
-      const fresh = await API.get("/tasks");
-      if (location.hash.replace(/^#/, "") === "/" || location.hash === "") { tasks = fresh; draw(); }
-    } catch {}
+  if (r.name === "home" && !app.activeId) {
+    main.append(renderHomeEmpty());
+    return main;
   }
-  startPoll(refresh, 10000);
+  if (r.name === "conv" && !app.detail) {
+    main.append(renderLoading());
+    return main;
+  }
+  main.append(renderHeader());
+  main.append(renderThreadBody());
+  main.append(renderComposer());
+  return main;
+}
 
-  function draw() {
-    clear(content);
-    content.append(h("div", { class: "page-head" },
-      h("div", {},
-        h("div", { class: "page-title" }, "Gallery"),
-        h("div", { class: "page-sub" }, tasks.length + " task" + (tasks.length === 1 ? "" : "s"))),
-      h("button", { class: "btn btn-primary", onclick: () => navigate("/new") }, "✚  New brief")));
+function renderHomeEmpty() {
+  return h("div", { class: "center-state" },
+    h("div", { class: "big" }, "💬"),
+    h("div", { class: "head" }, "Start a conversation"),
+    h("div", {}, "Describe what you want, or drop an image to start a Gate A run."),
+    h("button", { class: "new-chat-btn", style: { margin: "10px 0 0" }, onclick: startNewChat },
+      h("span", {}, "✚"), h("span", {}, "New chat")));
+}
 
-    const filters = [
-      ["all", "All"], ["active", "In progress"], ["waiting_human_review", "Needs review"],
-      ["human_approved", "Done"], ["failed", "Failed"],
-    ];
-    const chips = h("div", { class: "chips" });
-    for (const [key, label] of filters) {
-      chips.append(h("button", {
-        class: "chip" + (app.galleryFilter === key ? " on" : ""),
-        onclick: () => { app.galleryFilter = key; draw(); },
-      }, label));
+function renderLoading() {
+  return h("div", { class: "center-state" }, h("div", { class: "spinner" }));
+}
+
+function renderHeader() {
+  const newChat = !app.activeId;
+  const title = newChat ? "New chat" : (app.detail?.conversation?.title || "Untitled");
+  return h("header", { class: "thread-head" },
+    h("div", { class: "title" }, title),
+    !newChat && h("div", { class: "actions" },
+      h("button", { class: "head-btn", title: "Rename", onclick: renameActive }, "Rename"),
+      h("button", { class: "head-btn", title: "Hide chat", onclick: hideActive }, "Hide")));
+}
+
+function renderThreadBody() {
+  const body = h("div", { class: "thread-body" });
+  const inner = h("div", { class: "thread-inner" });
+  body.append(inner);
+
+  if (!app.activeId) {
+    // brand-new local chat — empty state inside the thread
+    inner.append(h("div", { class: "center-state", style: { padding: "30px 10px" } },
+      h("div", { class: "big" }, "✦"),
+      h("div", { class: "head" }, "What should we make?"),
+      h("div", {}, "Drop a reference image and tell me what you want.")));
+    return body;
+  }
+
+  const detail = app.detail;
+  if (!detail) { body.append(h("div", { class: "spinner" })); return body; }
+
+  // gallery strip at top if there are generated images
+  if (detail.gallery && detail.gallery.length) {
+    const strip = h("div", { class: "gallery-strip", title: "Images generated in this chat" });
+    for (const a of detail.gallery) {
+      strip.append(h("img", {
+        src: assetUrl(a.asset_id), alt: "",
+        onclick: () => { app.lightbox = a.asset_id; render(); },
+      }));
     }
-    content.append(chips);
+    inner.append(strip);
+  }
 
-    const shown = tasks.filter(t => {
-      const f = app.galleryFilter;
-      if (f === "all") return true;
-      if (f === "active") return ACTIVE_STATES.includes(t.workflow_state);
-      return t.workflow_state === f;
+  // messages
+  const taskById = {};
+  for (const t of (detail.tasks || [])) taskById[t.task_id] = t;
+  const latestAgentMsgByTask = {};
+  for (const m of detail.messages) {
+    if (m.role === "agent" && m.related_task_id) latestAgentMsgByTask[m.related_task_id] = m.message_id;
+  }
+
+  for (const m of detail.messages) {
+    if (m.role === "user" && !m.content.trim() && (!m.attachments || !m.attachments.length)) continue;
+    inner.append(renderBubble(m, taskById, latestAgentMsgByTask));
+  }
+
+  if (app.sending) {
+    inner.append(h("div", { class: "row agent" },
+      h("div", { class: "bubble agent", style: { opacity: ".7" } },
+        h("span", { class: "bubble-status" },
+          h("span", { class: "pulse" }), "thinking…"))));
+  }
+
+  // scroll to bottom after render
+  setTimeout(() => { body.scrollTop = body.scrollHeight; }, 0);
+  return body;
+}
+
+function renderBubble(m, taskById, latestAgentMsgByTask) {
+  const row = h("div", { class: "row " + m.role });
+  if (m.role === "system") {
+    row.append(h("div", { class: "bubble system" }, m.content));
+    return row;
+  }
+  const bubble = h("div", { class: "bubble " + m.role });
+
+  // user attachments shown above text
+  if (m.role === "user" && m.attachments && m.attachments.length) {
+    const grid = h("div", { class: "bubble-attachments" });
+    for (const aid of m.attachments) {
+      grid.append(h("img", { src: assetUrl(aid), alt: "",
+        onclick: () => { app.lightbox = aid; render(); } }));
+    }
+    bubble.append(grid);
+  }
+
+  if (m.content) bubble.append(h("span", {}, m.content));
+
+  // agent bubble action area — show image + buttons when this is the latest
+  // agent bubble for a task currently waiting on the designer.
+  if (m.role === "agent" && m.related_task_id && latestAgentMsgByTask[m.related_task_id] === m.message_id) {
+    const task = taskById[m.related_task_id];
+    if (task) {
+      if (task.workflow_state === "waiting_human_review") {
+        appendReviewPanel(bubble, m);
+      } else if (task.workflow_state === "failed") {
+        appendFailurePanel(bubble, m);
+      } else if (ACTIVE_STATES.includes(task.workflow_state)) {
+        bubble.append(h("div", { class: "bubble-status" },
+          h("span", { class: "pulse" }), "still working…"));
+      }
+    }
+  }
+  row.append(bubble);
+  return row;
+}
+
+function appendReviewPanel(bubble, agentMsg) {
+  const runId = agentMsg.related_run_id;
+  const assets = (app.detail.gallery || []).filter(a => a.run_id === runId);
+  if (assets.length) {
+    const grid = h("div", { class: "bubble-images" });
+    let selected = assets[0].asset_id;
+    const imgs = [];
+    for (const a of assets) {
+      const img = h("img", {
+        src: assetUrl(a.asset_id), alt: "",
+        class: (assets.length > 1 && a.asset_id === selected) ? "sel" : "",
+      });
+      img.addEventListener("click", e => {
+        if (assets.length === 1) { app.lightbox = a.asset_id; render(); return; }
+        selected = a.asset_id;
+        for (const x of imgs) x.classList.remove("sel");
+        img.classList.add("sel");
+      });
+      imgs.push(img); grid.append(img);
+    }
+    bubble.append(grid);
+
+    const actions = h("div", { class: "bubble-actions" },
+      h("button", { class: "b-btn approve",
+        onclick: () => approveRun(runId, () => selected) }, "✓  Approve"),
+      h("button", { class: "b-btn reject",
+        onclick: () => { app.rejecting = { runId, reason: "" }; render(); } }, "✕  Reject"));
+    bubble.append(actions);
+
+    if (app.rejecting && app.rejecting.runId === runId) {
+      const ta = h("textarea", {
+        placeholder: "What's wrong with this result? (becomes the retry instruction)",
+        oninput: e => app.rejecting.reason = e.target.value,
+      }, app.rejecting.reason || "");
+      const form = h("div", { class: "reject-form" }, ta,
+        h("div", { class: "bubble-actions" },
+          h("button", { class: "b-btn",
+            onclick: () => { app.rejecting = null; render(); } }, "Cancel"),
+          h("button", { class: "b-btn reject",
+            onclick: () => rejectRun(runId, app.rejecting.reason) }, "Reject")));
+      bubble.append(form);
+      setTimeout(() => ta.focus(), 0);
+    }
+  }
+}
+
+function appendFailurePanel(bubble, agentMsg) {
+  // the orchestrator's agent message already explained the failure; here we
+  // just offer the designer an explicit retry-by-message hint.
+  bubble.append(h("div", { class: "fail-card" },
+    "This run failed. Send a new message to try again — describe the change you want."));
+}
+
+/* ========================== COMPOSER ===================================== */
+function renderComposer() {
+  const wrap = h("div", { class: "composer" });
+  const inner = h("div", { class: "composer-inner" });
+  wrap.append(inner);
+
+  if (app.composer.files.length) {
+    const row = h("div", { class: "attached-row" });
+    app.composer.files.forEach((f, i) => {
+      const chip = h("span", { class: "attached-chip" });
+      const url = URL.createObjectURL(f);
+      chip.append(
+        h("img", { src: url, alt: "" }),
+        h("span", {}, f.name.length > 22 ? f.name.slice(0,20) + "…" : f.name),
+        h("span", { class: "x",
+          onclick: () => { app.composer.files.splice(i, 1); render(); } }, "×"));
+      row.append(chip);
     });
-    if (!shown.length) {
-      content.append(h("div", { class: "empty" },
-        h("div", { class: "big" }, "🖼"),
-        h("div", {}, tasks.length ? "No tasks match this filter." : "No tasks yet."),
-        !tasks.length && h("div", { style: { marginTop: "14px" } },
-          h("button", { class: "btn btn-primary", onclick: () => navigate("/new") }, "Create your first brief"))));
-      return;
-    }
-    const grid = h("div", { class: "grid" });
-    for (const t of shown) grid.append(taskCard(t));
-    content.append(grid);
-  }
-  draw();
-}
-function taskCard(t) {
-  const thumb = t.thumbnail_asset_id
-    ? h("img", { class: "thumb", src: assetUrl(t.thumbnail_asset_id), loading: "lazy", alt: "" })
-    : h("div", { class: "thumb thumb-ph",
-        style: { background: "linear-gradient(135deg,hsl(" + hue(t.task_id) + ",42%,30%),hsl(" + ((hue(t.task_id)+60)%360) + ",40%,22%))" } },
-        t.workflow_state === "draft" ? "✎" : "◷");
-  return h("div", { class: "tcard", onclick: () => navigate("/task/" + t.task_id) },
-    thumb,
-    h("div", { class: "tcard-body" },
-      h("div", { class: "tcard-title" }, t.title || "Untitled"),
-      h("div", { class: "tcard-meta" },
-        pill(t.workflow_state),
-        h("span", { class: "tcard-time" }, timeAgo(t.created_at)))));
-}
-
-/* ------------------------------ new brief ---------------------------- */
-function screenNew(content) {
-  const f = app.forms;
-  if (f.newTitle === undefined) { f.newTitle = ""; f.newBrief = ""; f.newType = "static_image"; }
-  let files = [];
-  let busy = false;
-
-  function draw() {
-    clear(content);
-    content.append(h("a", { class: "backlink", href: "#/" }, "← Gallery"));
-    content.append(h("div", { class: "page-head" },
-      h("div", {}, h("div", { class: "page-title" }, "New brief"),
-        h("div", { class: "page-sub" }, "Describe what you need and attach reference images."))));
-
-    const card = h("div", { class: "card" });
-    card.append(field("Title", h("input", {
-      class: "input", value: f.newTitle, placeholder: "Hero image for spring campaign",
-      oninput: e => f.newTitle = e.target.value })));
-    card.append(field("Creative brief", h("textarea", {
-      class: "textarea", placeholder: "What should the image show? Mood, product, audience…",
-      oninput: e => f.newBrief = e.target.value }, f.newBrief)));
-
-    const sel = h("select", { class: "input", onchange: e => f.newType = e.target.value });
-    for (const [v, l] of [["static_image","Static image"],["video","Video"]]) {
-      sel.append(h("option", { value: v, selected: f.newType === v ? "selected" : null }, l));
-    }
-    card.append(field("Output type", sel));
-
-    const fileInput = h("input", { type: "file", accept: "image/*", multiple: "multiple",
-      style: { display: "none" },
-      onchange: e => { files = files.concat([...e.target.files]); draw(); } });
-    const drop = h("div", {
-      class: "card", style: { background: "var(--bg-3)", textAlign: "center", cursor: "pointer", boxShadow: "none" },
-      onclick: () => fileInput.click() },
-      h("div", { class: "muted" }, "📎  Click to attach reference images"));
-    card.append(field("Reference images", h("div", {}, fileInput, drop,
-      files.length ? h("div", { class: "row", style: { marginTop: "10px" } },
-        files.map((file, i) => h("span", { class: "pill gray" },
-          file.name.length > 22 ? file.name.slice(0,20) + "…" : file.name,
-          h("span", { style: { cursor: "pointer", marginLeft: "4px" },
-            onclick: ev => { ev.stopPropagation(); files.splice(i,1); draw(); } }, "✕")))) : null)));
-
-    if (!files.length) {
-      card.append(h("div", { class: "banner amber", style: { marginTop: "4px" } },
-        "Gate A needs at least one reference image — attach one before creating."));
-    }
-    card.append(h("div", { class: "row", style: { marginTop: "16px" } },
-      h("button", {
-        class: "btn btn-primary",
-        disabled: (busy || !f.newTitle.trim() || !f.newBrief.trim() || !files.length) ? "disabled" : null,
-        onclick: submit }, busy ? "Creating…" : "Create task"),
-      h("button", { class: "btn", onclick: () => navigate("/") }, "Cancel")));
-    content.append(card);
+    inner.append(row);
   }
 
-  async function submit() {
-    busy = true; draw();
-    try {
-      const task = await API.post("/tasks", {
-        title: f.newTitle.trim(), brief_text: f.newBrief.trim(),
-        requested_output_type: f.newType, created_by: "operator",
-      });
-      for (const file of files) {
-        const buf = await file.arrayBuffer();
-        const meta = {
-          original_filename: file.name,
-          content_type: file.type || "application/octet-stream",
-          size_bytes: file.size,
-          sha256: await sha256Hex(buf),
-          source_service: "manual",
-        };
-        const fd = new FormData();
-        fd.append("file", new Blob([buf], { type: meta.content_type }), file.name);
-        fd.append("metadata", JSON.stringify(meta));
-        await API.postForm("/tasks/" + task.task_id + "/references", fd);
-      }
-      f.newTitle = ""; f.newBrief = ""; f.newType = "static_image";
-      toast("Task created", "ok");
-      navigate("/task/" + task.task_id);
-    } catch (e) {
-      busy = false; toast(e.message, "err"); draw();
-    }
-  }
-  draw();
-}
-function field(label, control) {
-  return h("label", { class: "fld" }, h("div", { class: "fld-label" }, label), control);
-}
-
-/* ----------------------------- task detail --------------------------- */
-async function screenTask(content, taskId) {
-  content.append(h("div", { class: "spinner" }));
-  let data;
-  async function load() {
-    const [summary, history] = await Promise.all([
-      API.get("/tasks/" + taskId), API.get("/tasks/" + taskId + "/history"),
-    ]);
-    return { summary, history };
-  }
-  try { data = await load(); }
-  catch (e) { clear(content); content.append(errorState(e, () => render())); return; }
-
-  function signature(d) {
-    const jobs = (d.history.jobs || []).map(j => j.job_id + j.state).join(",");
-    return [d.summary.workflow_state, jobs, (d.history.assets||[]).length,
-      (d.history.reviews||[]).length, (d.history.workflow_events||[]).length].join("|");
-  }
-  app.detailSig = signature(data);
-
-  async function refresh() {
-    if (location.hash.indexOf("/task/" + taskId) === -1) return;
-    try {
-      const fresh = await load();
-      const sig = signature(fresh);
-      if (sig !== app.detailSig) { app.detailSig = sig; data = fresh; draw(); }
-    } catch {}
-  }
-  function syncPoll() {
-    if (ACTIVE_STATES.includes(data.summary.workflow_state)) startPoll(refresh, 4000);
-    else if (data.summary.workflow_state === "waiting_human_review") startPoll(refresh, 9000);
-    else stopPoll();
-  }
-
-  function draw() {
-    clear(content);
-    const { summary, history } = data;
-    content.append(h("a", { class: "backlink", href: "#/" }, "← Gallery"));
-    content.append(h("div", { class: "page-head" },
-      h("div", {},
-        h("div", { class: "page-title" }, summary.title || "Untitled"),
-        h("div", { class: "page-sub" }, (summary.requested_output_type || "").replace(/_/g," "))),
-      pill(summary.workflow_state)));
-
-    // brief
-    content.append(h("div", { class: "card" },
-      h("div", { class: "card-title" }, "Brief"),
-      h("div", { class: "muted", style: { whiteSpace: "pre-wrap" } }, summary.brief_text || "—")));
-
-    // pipeline
-    content.append(pipelineCard(summary, history));
-
-    // state-specific action panel
-    const panel = actionPanel(data, draw, syncPoll);
-    if (panel) content.append(panel);
-
-    // prompt
-    const prompts = (history.prompts || []).filter(p => p.prompt_text);
-    if (prompts.length) {
-      const latest = prompts[prompts.length - 1];
-      content.append(h("div", { class: "card" },
-        h("div", { class: "card-title" }, "Generated prompt"),
-        h("div", { class: "prompt-box" }, latest.prompt_text)));
-    }
-
-    // generated images
-    const generated = (history.assets || []).filter(a => a.asset_class === "generated");
-    if (generated.length) {
-      content.append(h("div", { class: "card" },
-        h("div", { class: "card-title" }, "Generated images"),
-        h("div", { class: "imgrid" },
-          generated.map(a => h("img", { src: assetUrl(a.asset_id), loading: "lazy", alt: "",
-            onclick: () => window.open(assetUrl(a.asset_id), "_blank") })))));
-    }
-
-    // timeline
-    const events = [...(history.workflow_events || [])].reverse();
-    if (events.length) {
-      const tl = h("div", {});
-      for (const ev of events.slice(0, 40)) {
-        tl.append(h("div", { class: "tl-item" },
-          h("div", { class: "tl-dot" }),
-          h("div", { class: "tl-body" },
-            h("div", { class: "tl-text" }, humanizeEvent(ev)),
-            h("div", { class: "tl-time" }, timeAgo(ev.created_at)))));
-      }
-      content.append(h("div", { class: "card" },
-        h("div", { class: "card-title" }, "Activity"), tl));
-    }
-    syncPoll();
-  }
-  draw();
-}
-
-function pipelineCard(summary, history) {
-  const gem = stageStatus((history.jobs || []).filter(j => j.action_name === GEMINI_ACTION));
-  const fre = stageStatus((history.jobs || []).filter(j => j.action_name === FREEPIK_ACTION));
-  let rev = { s: "pending", sub: "Waiting" };
-  if (summary.workflow_state === "waiting_human_review") rev = { s: "running", sub: "Your review" };
-  else if (summary.workflow_state === "human_approved") rev = { s: "done", sub: "Approved" };
-  else if (summary.workflow_state === "human_rejected") rev = { s: "failed", sub: "Rejected" };
-  const stages = [
-    { name: "Gemini prompt", icon: "✦", st: gem },
-    { name: "Freepik image", icon: "❖", st: fre },
-    { name: "Review", icon: "✓", st: rev },
-  ];
-  const strip = h("div", { class: "pipeline" });
-  stages.forEach((stage, i) => {
-    const prevDone = i > 0 && stages[i-1].st.s === "done";
-    const meDone = stage.st.s === "done";
-    strip.append(h("div", { class: "stage" },
-      h("div", { class: "conn left" + (prevDone ? " fill" : "") }),
-      h("div", { class: "conn right" + (meDone ? " fill" : "") }),
-      h("div", { class: "node " + (stage.st.s === "pending" ? "" : stage.st.s) },
-        stage.st.s === "done" ? "✓" : stage.st.s === "failed" ? "!" : stage.icon),
-      h("div", { class: "stage-name" }, stage.name),
-      h("div", { class: "stage-sub" }, stage.st.sub)));
+  const fileInput = h("input", {
+    type: "file", accept: "image/*", multiple: "multiple",
+    style: { display: "none" },
+    onchange: e => {
+      app.composer.files = app.composer.files.concat([...e.target.files]);
+      render();
+    },
   });
-  return h("div", { class: "card" }, h("div", { class: "card-title" }, "Pipeline"), strip);
+
+  const box = h("div", { class: "composer-box" });
+  // drag-drop
+  box.addEventListener("dragover", e => { e.preventDefault(); box.classList.add("dragover"); });
+  box.addEventListener("dragleave", e => { box.classList.remove("dragover"); });
+  box.addEventListener("drop", e => {
+    e.preventDefault(); box.classList.remove("dragover");
+    const files = [...(e.dataTransfer?.files || [])].filter(f => f.type.startsWith("image/"));
+    if (files.length) { app.composer.files = app.composer.files.concat(files); render(); }
+  });
+
+  const textarea = h("textarea", {
+    placeholder: "Tell me what you want, or react to the last result…",
+    rows: "1",
+    value: app.composer.text,
+    oninput: e => {
+      app.composer.text = e.target.value;
+      autoSize(e.target);
+    },
+    onkeydown: e => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    },
+  });
+
+  box.append(
+    h("button", { class: "icon-btn", title: "Attach image",
+      onclick: () => fileInput.click() }, "📎"),
+    fileInput,
+    textarea,
+    h("button", {
+      class: "send-btn", title: "Send (Enter)",
+      disabled: app.sending || (!app.composer.text.trim() && !app.composer.files.length) ? "disabled" : null,
+      onclick: send,
+    }, "➤"));
+
+  inner.append(box);
+  inner.append(h("div", { class: "composer-help" },
+    "Enter to send • Shift+Enter for newline • Drop an image to start Gate A"));
+
+  setTimeout(() => { autoSize(textarea); textarea.focus(); }, 0);
+  return wrap;
 }
 
-function actionPanel(data, draw, syncPoll) {
-  const { summary, history } = data;
-  const state = summary.workflow_state;
-  const f = app.forms;
-
-  if (state === "draft") {
-    const refs = (history.assets || []).filter(a => a.asset_class === "reference");
-    const card = h("div", { class: "card" }, h("div", { class: "card-title" }, "Start Gate A"));
-    card.append(h("div", { class: "muted", style: { marginBottom: "12px" } },
-      refs.length + " reference image" + (refs.length === 1 ? "" : "s") + " attached."));
-    if (!refs.length) {
-      card.append(h("div", { class: "banner amber" },
-        "Gate A needs at least one reference image. Add one below to start."));
-      card.append(addReferenceControl(summary.task_id, draw));
-      return card;
-    }
-    card.append(field("Operator note (optional)", h("textarea", {
-      class: "textarea", placeholder: "Extra direction for the prompt…",
-      oninput: e => f.note = e.target.value }, f.note || "")));
-    card.append(field("Variants", h("input", {
-      class: "input", type: "number", min: "1", max: "20", value: f.variants || 1,
-      oninput: e => f.variants = e.target.value })));
-    let busy = false;
-    const btn = h("button", { class: "btn btn-primary", onclick: start }, "▶  Start Gate A");
-    card.append(h("div", { class: "row" }, btn, addReferenceControl(summary.task_id, draw)));
-    async function start() {
-      if (busy) return; busy = true; btn.textContent = "Starting…"; btn.disabled = true;
-      try {
-        await API.post("/tasks/" + summary.task_id + "/start-gate-a", {
-          task_id: summary.task_id,
-          operator_note: (f.note || "").trim() || null,
-          variant_count: Math.max(1, Math.min(20, parseInt(f.variants || 1, 10) || 1)),
-        });
-        f.note = ""; f.variants = 1;
-        toast("Gate A started", "ok");
-        render();
-      } catch (e) { busy = false; btn.textContent = "▶  Start Gate A"; btn.disabled = false; toast(e.message, "err"); }
-    }
-    return card;
-  }
-
-  if (ACTIVE_STATES.includes(state)) {
-    const progress = [...(history.workflow_events || [])].reverse()
-      .find(ev => ev.event_type === "job_progress");
-    const msg = progress ? humanizeEvent(progress) : "Waiting for a worker to pick this up…";
-    return h("div", { class: "card" },
-      h("div", { class: "card-title" }, "In progress"),
-      h("div", { class: "banner amber" }, "⏳  " + msg),
-      h("div", { class: "faint", style: { marginTop: "10px" } }, "This view refreshes automatically."));
-  }
-
-  if (state === "waiting_human_review") {
-    return reviewPanel(data, draw);
-  }
-
-  if (state === "human_rejected") {
-    return retryPanel(data, draw);
-  }
-
-  if (state === "human_approved") {
-    return h("div", { class: "card" },
-      h("div", { class: "card-title" }, "Result"),
-      h("div", { class: "banner blue" }, "✓  This task is approved and complete."));
-  }
-
-  if (state === "failed") {
-    const failedJob = [...(history.jobs || [])].reverse()
-      .find(j => ["failed_fatal","failed_retryable","orphaned"].includes(j.state));
-    const card = h("div", { class: "card" }, h("div", { class: "card-title" }, "Failed"));
-    card.append(h("div", { class: "banner red" },
-      "✕  " + (failedJob
-        ? ((failedJob.failure_type || "error") + " — " + (failedJob.failure_message || "no detail"))
-        : "This task failed.")));
-    let busy = false;
-    const btn = h("button", { class: "btn btn-primary", style: { marginTop: "12px" }, onclick: again },
-      "↻  Run Gate A again");
-    card.append(btn);
-    async function again() {
-      if (busy) return; busy = true; btn.disabled = true; btn.textContent = "Starting…";
-      try {
-        await API.post("/tasks/" + summary.task_id + "/start-gate-a",
-          { task_id: summary.task_id, operator_note: null, variant_count: 1 });
-        toast("New Gate A run started", "ok"); render();
-      } catch (e) { busy = false; btn.disabled = false; btn.textContent = "↻  Run Gate A again"; toast(e.message, "err"); }
-    }
-    return card;
-  }
-  return null;
+function autoSize(ta) {
+  ta.style.height = "auto";
+  ta.style.height = Math.min(200, ta.scrollHeight) + "px";
 }
 
-function addReferenceControl(taskId, draw) {
-  const input = h("input", { type: "file", accept: "image/*", style: { display: "none" },
-    onchange: async e => {
-      const file = e.target.files[0]; if (!file) return;
-      try {
-        const buf = await file.arrayBuffer();
-        const meta = { original_filename: file.name, content_type: file.type || "application/octet-stream",
-          size_bytes: file.size, sha256: await sha256Hex(buf), source_service: "manual" };
-        const fd = new FormData();
-        fd.append("file", new Blob([buf], { type: meta.content_type }), file.name);
-        fd.append("metadata", JSON.stringify(meta));
-        await API.postForm("/tasks/" + taskId + "/references", fd);
-        toast("Reference added", "ok");
-        const fresh = await Promise.all([API.get("/tasks/"+taskId), API.get("/tasks/"+taskId+"/history")]);
-        render();
-      } catch (err) { toast(err.message, "err"); }
-    } });
-  return h("span", {}, input,
-    h("button", { class: "btn btn-sm", onclick: () => input.click() }, "+ Add reference"));
+/* ========================== ACTIONS ====================================== */
+function startNewChat() {
+  app.activeId = null;
+  app.detail = null;
+  app.composer = { text: "", files: [] };
+  app.rejecting = null;
+  navigate("/");
+  // /  is parsed as home; we still render the composer because activeId being
+  //   null is the new-chat sentinel.
+  render();
 }
 
-function reviewPanel(data, draw) {
-  const { summary, history } = data;
-  const runId = summary.latest_run_id;
-  const generated = (history.assets || []).filter(a =>
-    a.asset_class === "generated" && (!runId || a.run_id === runId));
-  const pool = generated.length ? generated : (history.assets || []).filter(a => a.asset_class === "generated");
-  const f = app.forms;
-  if (!f.selectedAsset || !pool.some(a => a.asset_id === f.selectedAsset)) {
-    f.selectedAsset = pool.length ? pool[0].asset_id : null;
-  }
-  const card = h("div", { class: "card" }, h("div", { class: "card-title" }, "Your review"));
-  if (!pool.length) {
-    card.append(h("div", { class: "banner amber" }, "No generated image found for this run yet."));
-    return card;
-  }
-  card.append(h("div", { class: "muted", style: { marginBottom: "10px" } },
-    pool.length > 1 ? "Pick the variant you want, then approve — or reject with a reason." :
-    "Approve this result, or reject it with a reason."));
-  const grid = h("div", { class: "imgrid" });
-  for (const a of pool) {
-    grid.append(h("img", {
-      src: assetUrl(a.asset_id), alt: "", loading: "lazy",
-      class: f.selectedAsset === a.asset_id ? "sel" : "",
-      onclick: () => { f.selectedAsset = a.asset_id; draw(); } }));
-  }
-  card.append(grid);
-  card.append(field("Reason (required to reject)", h("textarea", {
-    class: "textarea", style: { marginTop: "12px" }, placeholder: "What is wrong with this result?",
-    oninput: e => f.rejectReason = e.target.value }, f.rejectReason || "")));
+async function send() {
+  const text = app.composer.text.trim();
+  const files = app.composer.files;
+  if (!text && !files.length) return;
+  if (app.sending) return;
+  app.sending = true; app.rejecting = null; render();
 
-  let busy = false;
-  const approveBtn = h("button", { class: "btn btn-green", onclick: () => decide("approved") }, "✓  Approve");
-  const rejectBtn = h("button", { class: "btn btn-danger", onclick: () => decide("rejected") }, "✕  Reject");
-  card.append(h("div", { class: "row" }, approveBtn, rejectBtn));
-
-  async function decide(decision) {
-    if (busy) return;
-    if (decision === "rejected" && !(f.rejectReason || "").trim()) {
-      toast("Add a reason before rejecting", "err"); return;
+  try {
+    if (!app.activeId) {
+      const conv = await API.post("/conversations", {});
+      app.activeId = conv.conversation_id;
+      navigate("/conv/" + conv.conversation_id);
+      // ensure detail is set so render() doesn't bounce to the spinner state
+      app.detail = { conversation: conv, messages: [], gallery: [], tasks: [] };
     }
-    busy = true; approveBtn.disabled = rejectBtn.disabled = true;
-    try {
-      await API.post("/tasks/" + summary.task_id + "/reviews", {
-        run_id: runId, decision,
-        selected_asset_id: decision === "approved" ? f.selectedAsset : null,
-        reason: (f.rejectReason || "").trim() || null,
-      });
-      f.rejectReason = "";
-      toast(decision === "approved" ? "Approved" : "Rejected", "ok");
-      render();
-    } catch (e) { busy = false; approveBtn.disabled = rejectBtn.disabled = false; toast(e.message, "err"); }
+
+    const fd = new FormData();
+    if (text) fd.append("text", text);
+    for (const f of files) fd.append("attachments", f, f.name);
+
+    const result = await API.postForm("/conversations/" + app.activeId + "/messages", fd);
+
+    app.composer = { text: "", files: [] };
+    // patch detail with the two new messages (optimistic)
+    if (result.user_message) app.detail.messages.push(result.user_message);
+    if (result.agent_message) app.detail.messages.push(result.agent_message);
+    // reload sidebar + detail fully — message endpoint may have started a task
+    await Promise.all([loadConversation(app.activeId), loadList()]);
+  } catch (e) {
+    toast(e.message || "send failed", "err");
+  } finally {
+    app.sending = false;
+    render();
   }
-  return card;
 }
 
-function retryPanel(data, draw) {
-  const { summary, history } = data;
-  const rejected = [...(history.reviews || [])].reverse().find(r => r.decision === "rejected");
-  const f = app.forms;
-  const card = h("div", { class: "card" }, h("div", { class: "card-title" }, "Rejected — retry"));
-  if (rejected && rejected.reason) {
-    card.append(h("div", { class: "banner red", style: { marginBottom: "12px" } },
-      "Your reason: " + rejected.reason));
-  }
-  if (!rejected) {
-    card.append(h("div", { class: "banner amber" }, "No rejected review found to retry from."));
-    return card;
-  }
-  card.append(field("How should the retry fix it?", h("textarea", {
-    class: "textarea", placeholder: "Describe the change you want in the next attempt…",
-    oninput: e => f.retryInstruction = e.target.value }, f.retryInstruction || "")));
-  let busy = false;
-  const btn = h("button", { class: "btn btn-primary", onclick: doRetry }, "↻  Retry Gate A");
-  card.append(btn);
-  async function doRetry() {
-    if (busy) return;
-    if (!(f.retryInstruction || "").trim()) { toast("Describe what to fix first", "err"); return; }
-    busy = true; btn.disabled = true; btn.textContent = "Starting retry…";
-    try {
-      await API.post("/tasks/" + summary.task_id + "/retry", {
-        source_run_id: rejected.run_id, review_id: rejected.review_id,
-        repair_instruction: f.retryInstruction.trim(),
-      });
-      f.retryInstruction = "";
-      toast("Retry started", "ok");
-      render();
-    } catch (e) { busy = false; btn.disabled = false; btn.textContent = "↻  Retry Gate A"; toast(e.message, "err"); }
-  }
-  return card;
+async function approveRun(runId, getSelected) {
+  if (app.sending) return;
+  app.sending = true; render();
+  try {
+    await API.postForm("/conversations/" + app.activeId + "/messages",
+      _formWithAction({ type: "approve", run_id: runId, selected_asset_id: getSelected() }));
+    await loadConversation(app.activeId);
+    await loadList();
+  } catch (e) { toast(e.message, "err"); }
+  finally { app.sending = false; render(); }
 }
 
-/* -------------------------------- chat ------------------------------- */
-function screenChat(content) {
-  const f = app.forms;
-  function draw() {
-    clear(content);
-    const thread = h("div", { class: "chat-thread" });
-    if (!app.chat.length) {
-      thread.append(h("div", { class: "empty" },
-        h("div", { class: "big" }, "💬"),
-        h("div", {}, "Ask the local agent anything about your tasks.")));
-    }
-    for (const m of app.chat) {
-      if (m.role === "system") thread.append(h("div", { class: "msg sys" }, m.text));
-      else thread.append(h("div", { class: "msg " + (m.role === "user" ? "user" : "bot") }, m.text));
-    }
-    const input = h("textarea", { class: "textarea", style: { minHeight: "44px" },
-      placeholder: "Message the agent…  (Enter to send)", value: f.chatInput || "",
-      oninput: e => f.chatInput = e.target.value,
-      onkeydown: e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } } });
-    content.append(h("div", { class: "chat-wrap" }, thread,
-      h("div", { class: "chat-input" }, input,
-        h("button", { class: "btn btn-primary", onclick: send }, "Send"))));
-    thread.scrollTop = thread.scrollHeight;
-    setTimeout(() => input.focus(), 0);
-  }
-  async function send() {
-    const text = (f.chatInput || "").trim();
-    if (!text) return;
-    app.chat.push({ role: "user", text });
-    f.chatInput = "";
-    draw();
-    try {
-      const res = await API.post("/tasks/agent-chat", { message: text });
-      if (res.reply && res.reply.text) {
-        app.chat.push({ role: "bot", text: res.reply.text });
-      } else if (res.job_id) {
-        app.chat.push({ role: "system", text: "Sent to a worker agent — follow it in the task view." });
-        app.chat.push({ role: "bot", text: "Working on it on the worker. Open task " + res.task_id + " to see the reply." });
-      } else {
-        app.chat.push({ role: "bot", text: "(no reply returned)" });
-      }
-    } catch (e) {
-      app.chat.push({ role: "system", text: "Failed: " + e.message });
-    }
-    draw();
-  }
-  draw();
+async function rejectRun(runId, reason) {
+  reason = (reason || "").trim();
+  if (!reason) { toast("Add a reason first.", "err"); return; }
+  if (app.sending) return;
+  app.sending = true; render();
+  try {
+    await API.postForm("/conversations/" + app.activeId + "/messages",
+      _formWithAction({ type: "reject", run_id: runId, reason }));
+    app.rejecting = null;
+    await loadConversation(app.activeId);
+    await loadList();
+  } catch (e) { toast(e.message, "err"); }
+  finally { app.sending = false; render(); }
 }
 
-/* ------------------------------- system ------------------------------ */
-async function screenSystem(content) {
-  async function draw() {
-    let health, workers;
-    try {
-      [health, workers] = await Promise.all([API.get("/health"), API.get("/workers")]);
-      app.health = health; app.workers = workers;
-    } catch (e) {
-      app.health = { ok: false };
-      clear(content); content.append(errorState(e, draw)); return;
-    }
-    clear(content);
-    content.append(h("div", { class: "page-head" },
-      h("div", {}, h("div", { class: "page-title" }, "System"),
-        h("div", { class: "page-sub" }, "Operator server and connected workers."))));
+function _formWithAction(action) {
+  const fd = new FormData();
+  fd.append("action", JSON.stringify(action));
+  return fd;
+}
 
-    content.append(h("div", { class: "card" },
-      h("div", { class: "card-title" }, "Operator"),
-      h("div", { class: "sys-row", style: { fontSize: "13px" } },
-        h("span", { class: "dot " + (health.ok ? "green" : "red") }),
-        health.ok ? "Online — database reachable" : "Unreachable"),
-      health.ok && h("div", { class: "faint", style: { marginTop: "8px" } },
-        health.server_public_base_url || "")));
+async function hideChat(cid) {
+  try { await API.post("/conversations/" + cid + "/hide"); }
+  catch (e) { toast(e.message, "err"); return; }
+  if (cid === app.activeId) { app.activeId = null; app.detail = null; navigate("/"); }
+  await loadList();
+  if (app.showHidden) await loadHiddenList();
+  render();
+}
+async function hideActive() {
+  if (!app.activeId) return;
+  if (!confirm("Hide this chat? It stays in the database; you can restore it later.")) return;
+  await hideChat(app.activeId);
+}
+async function restoreChat(cid) {
+  try { await API.post("/conversations/" + cid + "/restore"); }
+  catch (e) { toast(e.message, "err"); return; }
+  await Promise.all([loadList(), loadHiddenList()]);
+  render();
+}
+async function renameActive() {
+  if (!app.activeId) return;
+  const current = app.detail?.conversation?.title || "";
+  const next = prompt("Rename chat:", current);
+  if (next === null) return;
+  const title = next.trim();
+  if (!title || title === current) return;
+  try {
+    await API.patch("/conversations/" + app.activeId, { title });
+    await Promise.all([loadConversation(app.activeId), loadList()]);
+  } catch (e) { toast(e.message, "err"); }
+}
 
-    const wcard = h("div", { class: "card" }, h("div", { class: "card-title" },
-      "Workers (" + workers.length + ")"));
-    if (!workers.length) {
-      wcard.append(h("div", { class: "muted" }, "No workers have registered yet."));
-    } else {
-      for (const w of workers) {
-        const stale = w.last_heartbeat_at &&
-          (Date.now() - new Date(w.last_heartbeat_at).getTime()) > 60000;
-        const color = stale || w.status === "offline" ? "red" : (w.active_job_id ? "amber" : "green");
-        wcard.append(h("div", { class: "between", style: { padding: "9px 0",
-          borderBottom: "1px solid var(--border-soft)" } },
-          h("div", { class: "row" },
-            h("span", { class: "dot " + color }),
-            h("div", {},
-              h("div", { style: { fontWeight: "600" } }, w.display_name || w.worker_id),
-              h("div", { class: "faint" }, (w.capabilities || []).join(", ") || "no capabilities"))),
-          h("div", { style: { textAlign: "right" } },
-            h("div", { style: { fontSize: "12px" } }, stale ? "offline" : w.status),
-            h("div", { class: "faint" },
-              w.active_job_id ? "job " + w.active_job_id : "heartbeat " + timeAgo(w.last_heartbeat_at)))));
-      }
-    }
-    content.append(wcard);
+/* ========================== LOADING ====================================== */
+async function loadList() {
+  try { app.conversations = await API.get("/conversations"); }
+  catch { app.conversations = []; }
+}
+async function loadHiddenList() {
+  try {
+    const all = await API.get("/conversations?include_hidden=true");
+    app.hiddenConvs = all.filter(c => c.hidden_at);
+  } catch { app.hiddenConvs = []; }
+}
+async function loadConversation(id) {
+  try {
+    app.detail = await API.get("/conversations/" + id);
+  } catch (e) {
+    app.detail = null;
+    toast(e.message || "could not load chat", "err");
   }
-  content.append(h("div", { class: "spinner" }));
-  await draw();
-  startPoll(draw, 15000);
 }
-
-/* ----------------------------- error state --------------------------- */
-function errorState(e, retry) {
-  const offline = !e.status;
-  return h("div", { class: "empty" },
-    h("div", { class: "big" }, offline ? "🔌" : "⚠"),
-    h("div", { style: { fontWeight: "600", marginBottom: "4px" } },
-      offline ? "Can't reach the operator" : "Something went wrong"),
-    h("div", { class: "muted" }, offline
-      ? "Is the server running?  Start it with the operator CLI, then retry."
-      : e.message),
-    h("div", { style: { marginTop: "16px" } },
-      h("button", { class: "btn btn-primary", onclick: retry }, "Retry")));
-}
-
-/* ------------------------------ router ------------------------------- */
-async function refreshShellData() {
+async function refreshHealth() {
   try {
     const [health, workers] = await Promise.all([
       API.get("/health").catch(() => ({ ok: false })),
@@ -1032,49 +910,84 @@ async function refreshShellData() {
     app.health = health; app.workers = workers;
   } catch { app.health = { ok: false }; }
 }
-function parseRoute() {
-  const raw = (location.hash || "#/").replace(/^#/, "");
-  if (raw.startsWith("/task/")) return { name: "task", id: raw.slice(6) };
-  if (raw === "/new") return { name: "new" };
-  if (raw === "/chat") return { name: "chat" };
-  if (raw === "/system") return { name: "system" };
-  return { name: "gallery" };
-}
-async function render() {
+
+/* ========================== POLLING ====================================== */
+function syncPolling() {
   stopPoll();
-  const route = parseRoute();
-  const routeHash = route.name === "task" ? "/task/" + route.id
-    : route.name === "gallery" ? "/" : "/" + route.name;
+  const r = parseRoute();
+  if (r.name === "conv" && app.detail) {
+    const anyActive = (app.detail.tasks || []).some(t => ACTIVE_STATES.includes(t.workflow_state));
+    if (anyActive) startPoll(async () => {
+      if (document.hidden) return;
+      await loadConversation(app.activeId);
+      await loadList();
+      render();
+    }, 3500);
+    else startPoll(async () => {
+      if (document.hidden) return;
+      await loadList();
+      render();
+    }, 12000);
+  } else {
+    startPoll(async () => {
+      if (document.hidden) return;
+      await loadList();
+      render();
+    }, 12000);
+  }
+}
+
+/* ========================== RENDER ROOT ================================= */
+async function onRouteChange() {
+  const r = parseRoute();
+  app.rejecting = null;
+  if (r.name === "conv" && r.id !== app.activeId) {
+    app.activeId = r.id;
+    app.detail = null;
+    render();
+    await loadConversation(r.id);
+  } else if (r.name === "home") {
+    // home keeps composer ready for a new chat; clear detail
+    if (app.activeId !== null) { app.activeId = null; app.detail = null; }
+  }
+  render();
+}
+
+function render() {
   const root = document.getElementById("root");
   clear(root);
-  const main = h("main", { class: "main" });
-  const content = h("div", { class: "content" });
-  main.append(content);
-  root.append(renderShell(routeHash), main);
-
-  if (route.name === "gallery") await screenGallery(content);
-  else if (route.name === "new") screenNew(content);
-  else if (route.name === "task") await screenTask(content, route.id);
-  else if (route.name === "chat") screenChat(content);
-  else if (route.name === "system") await screenSystem(content);
+  root.append(renderSidebar(), renderMain());
+  if (app.lightbox) {
+    const lb = h("div", { class: "lightbox", onclick: () => { app.lightbox = null; render(); } },
+      h("img", { src: assetUrl(app.lightbox), alt: "" }));
+    document.body.append(lb);
+    // remove the previous lightbox node next render
+    const lbs = document.querySelectorAll(".lightbox");
+    for (let i = 0; i < lbs.length - 1; i++) lbs[i].remove();
+  } else {
+    document.querySelectorAll(".lightbox").forEach(n => n.remove());
+  }
+  syncPolling();
 }
 
-/* ------------------------------- boot -------------------------------- */
-(function boot() {
+/* ============================== BOOT ===================================== */
+(async function boot() {
   try { if (localStorage.getItem("cw_theme") === "light") document.body.classList.add("light"); } catch {}
-  window.addEventListener("hashchange", render);
-  refreshShellData().then(render);
-  // keep the sidebar status fresh without disturbing the active screen
-  setInterval(() => { refreshShellData().then(() => {
-    const r = parseRoute();
-    if (r.name !== "system") {
-      const sb = document.querySelector(".sidebar");
-      if (sb) {
-        const routeHash = r.name === "task" ? "/task/" + r.id : r.name === "gallery" ? "/" : "/" + r.name;
-        sb.replaceWith(renderShell(routeHash));
-      }
-    }
-  }); }, 20000);
+  window.addEventListener("hashchange", onRouteChange);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) syncPolling(); });
+
+  await refreshHealth();
+  await loadList();
+
+  const r = parseRoute();
+  if (r.name === "conv") {
+    app.activeId = r.id;
+    await loadConversation(r.id);
+  }
+  render();
+
+  // refresh health every 20s; sidebar status stays current without disturbing the thread.
+  setInterval(async () => { await refreshHealth(); render(); }, 20000);
 })();
 </script>
 </body>
