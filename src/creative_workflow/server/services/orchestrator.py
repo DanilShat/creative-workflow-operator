@@ -1,0 +1,399 @@
+"""Conversation orchestrator — the chat layer's brain.
+
+Phase 2 is deterministic:
+
+* An explicit action (approve / reject / retry) is forwarded to the existing
+  WorkflowService — same review and retry semantics as the old buttons.
+* A message with image attachments is treated as a Gate A request: store
+  the images as references, create the task, start the run.
+* Plain text gets a placeholder agent reply; the local LLM lands in phase 3.
+
+Every user turn writes a row in `messages`, every agent reply does too, so
+the chat history is the source of truth for the UI.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from sqlalchemy import desc, func, select
+from sqlalchemy.orm import Session
+
+from creative_workflow.server.config import ServerSettings
+from creative_workflow.server.db.models import Asset, Conversation, Message, Run, Task
+from creative_workflow.server.services.artifacts import ArtifactService, sha256_bytes
+from creative_workflow.server.services.workflow import WorkflowService
+from creative_workflow.shared.contracts.assets import ReferenceUploadMetadata
+from creative_workflow.shared.contracts.conversations import (
+    ConversationDetailResponse,
+    ConversationSummary,
+    MessageItem,
+)
+from creative_workflow.shared.enums import AssetClass, SourceService
+from creative_workflow.shared.ids import new_id
+from creative_workflow.shared.time import utc_now
+
+
+class OrchestratorError(Exception):
+    """Raised when the orchestrator cannot process the request."""
+
+
+_VARIANT_RE = re.compile(
+    r"\b(?:make\s+)?(\d{1,2})\s*(?:variants?|versions?|options?|images?)\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_variant_count(text: str) -> int:
+    """Heuristic: '3 variants' / 'make 4 options' / '2 images' → integer count."""
+    match = _VARIANT_RE.search(text or "")
+    if not match:
+        return 1
+    return max(1, min(20, int(match.group(1))))
+
+
+def _derive_title_from_message(text: str) -> str:
+    """Phase-2 title: first sentence or first 60 chars."""
+    text = (text or "").strip()
+    if not text:
+        return "Untitled task"
+    for end in ".!?\n":
+        idx = text.find(end)
+        if 5 < idx < 80:
+            return text[:idx].strip()
+    return text[:60].rstrip() + ("…" if len(text) > 60 else "")
+
+
+def _infer_output_type(text: str) -> str:
+    return "video" if "video" in (text or "").lower() else "static_image"
+
+
+class ConversationOrchestrator:
+    def __init__(self, db: Session, settings: ServerSettings):
+        self.db = db
+        self.settings = settings
+        self.workflow = WorkflowService(db, settings)
+        self.artifacts = ArtifactService(db, settings)
+
+    # ---------- conversation CRUD ----------
+
+    def create(self, title: str | None = None) -> Conversation:
+        clean = (title or "").strip()[:255] or "Untitled"
+        conv = Conversation(conversation_id=new_id("conv"), title=clean)
+        self.db.add(conv)
+        self.db.commit()
+        self.db.refresh(conv)
+        return conv
+
+    def list(self, include_hidden: bool = False) -> list[ConversationSummary]:
+        q = select(Conversation)
+        if not include_hidden:
+            q = q.where(Conversation.hidden_at.is_(None))
+        q = q.order_by(desc(Conversation.updated_at))
+        return [self.summary(c) for c in self.db.scalars(q).all()]
+
+    def get(self, conversation_id: str) -> ConversationDetailResponse:
+        conv = self._require(conversation_id)
+        msgs = self.db.scalars(
+            select(Message)
+            .where(Message.conversation_id == conv.conversation_id)
+            .order_by(Message.created_at)
+        ).all()
+        return ConversationDetailResponse(
+            conversation=self.summary(conv),
+            messages=[self.message_item(m) for m in msgs],
+            gallery=self._gallery(conv.conversation_id),
+            tasks=self._tasks(conv.conversation_id),
+        )
+
+    def hide(self, conversation_id: str) -> None:
+        conv = self._require(conversation_id)
+        conv.hidden_at = utc_now()
+        self.db.commit()
+
+    def restore(self, conversation_id: str) -> None:
+        conv = self._require(conversation_id)
+        conv.hidden_at = None
+        self.db.commit()
+
+    def rename(self, conversation_id: str, title: str) -> Conversation:
+        conv = self._require(conversation_id)
+        conv.title = title.strip()[:255]
+        self.db.commit()
+        self.db.refresh(conv)
+        return conv
+
+    # ---------- the routing entry point ----------
+
+    def post_message(
+        self,
+        conversation_id: str,
+        text: str,
+        action: dict[str, Any] | None,
+        attachments: list[tuple[bytes, str, str]],
+    ) -> tuple[Message, Message | None]:
+        """Route a single user turn. Returns (user_message, agent_message).
+
+        attachments is a list of (raw_bytes, original_filename, content_type).
+        """
+
+        conv = self._require(conversation_id, allow_hidden=False)
+        if not (text or attachments or action):
+            raise OrchestratorError("nothing to do — send text, an attachment, or an action")
+
+        user_msg = Message(
+            message_id=new_id("msg"),
+            conversation_id=conv.conversation_id,
+            role="user",
+            content=text or "",
+            attachments_json=[],
+        )
+        self.db.add(user_msg)
+
+        try:
+            if action is not None:
+                agent_msg = self._handle_action(conv, action, user_msg)
+            elif attachments:
+                agent_msg = self._handle_gate_a(conv, user_msg, text or "", attachments)
+            else:
+                agent_msg = self._handle_text_only(conv)
+        except OrchestratorError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - surface as a chat error, never lose the turn
+            agent_msg = self._agent(conv, f"Something went wrong: {exc}")
+
+        conv.updated_at = utc_now()
+        self.db.commit()
+        self.db.refresh(user_msg)
+        if agent_msg is not None:
+            self.db.refresh(agent_msg)
+        return user_msg, agent_msg
+
+    # ---------- handlers ----------
+
+    def _handle_action(
+        self, conv: Conversation, action: dict[str, Any], user_msg: Message
+    ) -> Message:
+        kind = action.get("type")
+        run_id = action.get("run_id")
+        task = self._task_for_run(conv, run_id)
+        user_msg.related_task_id = task.task_id
+        user_msg.related_run_id = run_id
+
+        if kind == "approve":
+            self.workflow.record_review(
+                task.task_id, run_id, "approved", action.get("selected_asset_id"), None
+            )
+            return self._agent(
+                conv, "Approved.", related_task_id=task.task_id, related_run_id=run_id
+            )
+
+        if kind == "reject":
+            reason = (action.get("reason") or "").strip()
+            if not reason:
+                raise OrchestratorError("reject needs a reason")
+            self.workflow.record_review(task.task_id, run_id, "rejected", None, reason)
+            return self._agent(
+                conv,
+                "Got it — rejected. Send a retry message when you want me to try again.",
+                related_task_id=task.task_id,
+                related_run_id=run_id,
+            )
+
+        if kind == "retry":
+            review_id = action.get("review_id")
+            instruction = (action.get("instruction") or "").strip()
+            if not review_id or not instruction:
+                raise OrchestratorError("retry needs review_id and instruction")
+            run, _ = self.workflow.retry_after_rejection(
+                task.task_id, run_id, review_id, instruction
+            )
+            return self._agent(
+                conv,
+                "Running another attempt.",
+                related_task_id=task.task_id,
+                related_run_id=run.run_id,
+            )
+
+        raise OrchestratorError(f"unknown action type: {kind!r}")
+
+    def _handle_gate_a(
+        self,
+        conv: Conversation,
+        user_msg: Message,
+        text: str,
+        attachments: list[tuple[bytes, str, str]],
+    ) -> Message:
+        title = _derive_title_from_message(text)
+        brief = text.strip() or "(image-only brief)"
+        output_type = _infer_output_type(text)
+        variant_count = _parse_variant_count(text)
+
+        task = self.workflow.create_task(
+            title=title,
+            brief_text=brief,
+            requested_output_type=output_type,
+            created_by="chat",
+            conversation_id=conv.conversation_id,
+        )
+
+        asset_ids: list[str] = []
+        for data, filename, content_type in attachments:
+            meta = ReferenceUploadMetadata(
+                original_filename=filename or "reference",
+                content_type=content_type or "application/octet-stream",
+                size_bytes=len(data),
+                sha256=sha256_bytes(data),
+                source_service=SourceService.MANUAL,
+            )
+            asset = self.artifacts.store_reference(task.task_id, meta, data)
+            asset_ids.append(asset.asset_id)
+        user_msg.attachments_json = asset_ids
+
+        run, _ = self.workflow.start_gate_a(
+            task.task_id, operator_note=None, variant_count=variant_count
+        )
+        user_msg.related_task_id = task.task_id
+        user_msg.related_run_id = run.run_id
+
+        reply = (
+            f"Got it — starting Gate A "
+            f"({variant_count} variant{'s' if variant_count != 1 else ''}). "
+            "I'll come back when the image is ready to review."
+        )
+        return self._agent(
+            conv, reply, related_task_id=task.task_id, related_run_id=run.run_id
+        )
+
+    def _handle_text_only(self, conv: Conversation) -> Message:
+        return self._agent(
+            conv,
+            "I hear you. Real conversational replies arrive in the next phase — "
+            "for now, attach an image to start a Gate A run.",
+        )
+
+    # ---------- view-model helpers ----------
+
+    def summary(self, conv: Conversation) -> ConversationSummary:
+        last_msg = self.db.scalars(
+            select(Message)
+            .where(Message.conversation_id == conv.conversation_id)
+            .order_by(desc(Message.created_at))
+            .limit(1)
+        ).first()
+        msg_count = (
+            self.db.scalar(
+                select(func.count(Message.message_id)).where(
+                    Message.conversation_id == conv.conversation_id
+                )
+            )
+            or 0
+        )
+        gallery = self._gallery(conv.conversation_id, limit=1)
+        gallery_count = (
+            self.db.scalar(
+                select(func.count(Asset.asset_id))
+                .join(Task, Task.task_id == Asset.task_id)
+                .where(
+                    Task.conversation_id == conv.conversation_id,
+                    Asset.asset_class == AssetClass.GENERATED.value,
+                )
+            )
+            or 0
+        )
+        return ConversationSummary(
+            conversation_id=conv.conversation_id,
+            title=conv.title,
+            created_at=conv.created_at.isoformat(),
+            updated_at=(conv.updated_at or conv.created_at).isoformat(),
+            hidden_at=conv.hidden_at.isoformat() if conv.hidden_at else None,
+            message_count=msg_count,
+            last_message_preview=(last_msg.content[:140] if last_msg else None),
+            last_message_at=(last_msg.created_at.isoformat() if last_msg else None),
+            gallery_count=gallery_count,
+            thumbnail_asset_id=(gallery[0]["asset_id"] if gallery else None),
+        )
+
+    def message_item(self, m: Message) -> MessageItem:
+        return MessageItem(
+            message_id=m.message_id,
+            role=m.role,
+            content=m.content,
+            attachments=list(m.attachments_json or []),
+            related_task_id=m.related_task_id,
+            related_run_id=m.related_run_id,
+            created_at=m.created_at.isoformat(),
+        )
+
+    # ---------- internals ----------
+
+    def _agent(self, conv: Conversation, content: str, **kwargs: Any) -> Message:
+        msg = Message(
+            message_id=new_id("msg"),
+            conversation_id=conv.conversation_id,
+            role="agent",
+            content=content,
+            **kwargs,
+        )
+        self.db.add(msg)
+        return msg
+
+    def _require(self, conversation_id: str, allow_hidden: bool = True) -> Conversation:
+        conv = self.db.get(Conversation, conversation_id)
+        if conv is None:
+            raise OrchestratorError("conversation not found")
+        if not allow_hidden and conv.hidden_at is not None:
+            raise OrchestratorError("conversation is hidden — restore it first")
+        return conv
+
+    def _task_for_run(self, conv: Conversation, run_id: str | None) -> Task:
+        if not run_id:
+            raise OrchestratorError("run_id required")
+        run = self.db.get(Run, run_id)
+        if run is None:
+            raise OrchestratorError("run not found")
+        task = self.db.get(Task, run.task_id)
+        if task is None or task.conversation_id != conv.conversation_id:
+            raise OrchestratorError("run does not belong to this conversation")
+        return task
+
+    def _gallery(self, conversation_id: str, limit: int | None = None) -> list[dict[str, Any]]:
+        q = (
+            select(Asset)
+            .join(Task, Task.task_id == Asset.task_id)
+            .where(
+                Task.conversation_id == conversation_id,
+                Asset.asset_class == AssetClass.GENERATED.value,
+            )
+            .order_by(desc(Asset.created_at))
+        )
+        if limit:
+            q = q.limit(limit)
+        return [
+            {
+                "asset_id": a.asset_id,
+                "task_id": a.task_id,
+                "run_id": a.run_id,
+                "content_type": a.content_type,
+                "created_at": a.created_at.isoformat(),
+            }
+            for a in self.db.scalars(q).all()
+        ]
+
+    def _tasks(self, conversation_id: str) -> list[dict[str, Any]]:
+        rows = self.db.scalars(
+            select(Task)
+            .where(Task.conversation_id == conversation_id)
+            .order_by(desc(Task.created_at))
+        ).all()
+        return [
+            {
+                "task_id": t.task_id,
+                "workflow_state": t.workflow_state,
+                "title": t.title,
+                "requested_output_type": t.requested_output_type,
+                "created_at": t.created_at.isoformat(),
+            }
+            for t in rows
+        ]

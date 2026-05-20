@@ -30,9 +30,17 @@ class WorkflowService:
         self.settings = settings
         self.llm = LocalLLMService(settings)
 
-    def create_task(self, title: str, brief_text: str, requested_output_type: str, created_by: str) -> Task:
+    def create_task(
+        self,
+        title: str,
+        brief_text: str,
+        requested_output_type: str,
+        created_by: str,
+        conversation_id: str | None = None,
+    ) -> Task:
         task = Task(
             task_id=new_id("task"),
+            conversation_id=conversation_id,
             title=title,
             brief_text=brief_text,
             requested_output_type=requested_output_type,

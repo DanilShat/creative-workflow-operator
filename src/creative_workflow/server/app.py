@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from creative_workflow.server.api import assets, health, jobs, tasks, workers
+from creative_workflow.server.api import assets, conversations, health, jobs, tasks, workers
 from creative_workflow.server.config import ServerSettings
 from creative_workflow.server.db.session import make_session_factory
 from creative_workflow.server.services.job_queue import JobQueueService
@@ -73,6 +73,7 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
     app.include_router(jobs.router)
     app.include_router(assets.router)
     app.include_router(tasks.router)
+    app.include_router(conversations.router)
 
     # The operator console is a single-page app served same-origin, so its
     # fetch() calls to /api/v1/* need no CORS handling. Mounted after the API
