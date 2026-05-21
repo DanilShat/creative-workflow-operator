@@ -43,59 +43,129 @@ def _orch(db_session, server_settings, fake: FakeLLM) -> ConversationOrchestrato
 
 
 # ---------- auto-title ----------
+#
+# post_message now sets a HEURISTIC title synchronously (so the sidebar
+# row never reads "Untitled") and delegates the heavier LLM upgrade to
+# the API endpoint, which schedules it as a FastAPI BackgroundTask.
+# These tests exercise the orchestrator's half of that contract directly.
 
 
-def test_auto_title_sets_on_first_user_message(db_session, server_settings):
+def test_first_message_sets_heuristic_title_synchronously(db_session, server_settings):
+    """No LLM call happens inside post_message itself anymore."""
+
     fake = FakeLLM(title="Spring hero kickoff", intent=ChatIntent(type="chat"))
     orch = _orch(db_session, server_settings, fake)
     conv = orch.create()
 
-    orch.post_message(conv.conversation_id, "make me a hero image", None, [])
+    orch.post_message(conv.conversation_id, "I want a Christmas card with snow", None, [])
+
+    db_session.refresh(conv)
+    # Heuristic: first 5 words, capped at 80 chars.
+    assert conv.title == "I want a Christmas card"
+    assert fake.calls["auto_title"] == 0  # LLM upgrade is the API's job
+
+
+def test_first_message_signals_caller_to_schedule_async_title(db_session, server_settings):
+    """post_message calls schedule_auto_title(conv_id, seed) on first turn."""
+
+    fake = FakeLLM(title="Spring hero kickoff", intent=ChatIntent(type="chat"))
+    orch = _orch(db_session, server_settings, fake)
+    conv = orch.create()
+
+    scheduled: list[tuple[str, str]] = []
+    orch.post_message(
+        conv.conversation_id,
+        "I want a Christmas card with snow",
+        None,
+        [],
+        schedule_auto_title=lambda cid, seed: scheduled.append((cid, seed)),
+    )
+
+    assert scheduled == [(conv.conversation_id, "I want a Christmas card with snow")]
+
+
+def test_subsequent_messages_do_not_schedule_or_overwrite_title(
+    db_session, server_settings
+):
+    fake = FakeLLM(intent=ChatIntent(type="chat"))
+    orch = _orch(db_session, server_settings, fake)
+    conv = orch.create()
+
+    scheduled: list[tuple[str, str]] = []
+    sched = lambda cid, seed: scheduled.append((cid, seed))  # noqa: E731
+
+    orch.post_message(conv.conversation_id, "first message about hero", None, [], schedule_auto_title=sched)
+    orch.post_message(conv.conversation_id, "second", None, [], schedule_auto_title=sched)
+
+    db_session.refresh(conv)
+    assert conv.title == "first message about hero"
+    assert len(scheduled) == 1  # second turn did NOT schedule
+
+
+def test_first_message_on_already_named_conversation_does_nothing(
+    db_session, server_settings
+):
+    fake = FakeLLM(title="LLM suggested", intent=ChatIntent(type="chat"))
+    orch = _orch(db_session, server_settings, fake)
+    conv = orch.create("Designer named it")
+
+    scheduled: list[tuple[str, str]] = []
+    orch.post_message(
+        conv.conversation_id, "hello", None, [],
+        schedule_auto_title=lambda cid, seed: scheduled.append((cid, seed)),
+    )
+
+    db_session.refresh(conv)
+    assert conv.title == "Designer named it"
+    assert scheduled == []
+
+
+def test_upgrade_title_from_seed_applies_llm_title_over_heuristic(
+    db_session, server_settings
+):
+    """The background-task path: replaces the heuristic with the LLM title."""
+
+    fake = FakeLLM(title="Spring hero kickoff", intent=ChatIntent(type="chat"))
+    orch = _orch(db_session, server_settings, fake)
+    conv = orch.create()
+    orch.post_message(conv.conversation_id, "I want a Christmas card with snow", None, [])
+    db_session.refresh(conv)
+    assert conv.title == "I want a Christmas card"  # heuristic from sync path
+
+    orch.upgrade_title_from_seed(conv.conversation_id, "I want a Christmas card with snow")
 
     db_session.refresh(conv)
     assert conv.title == "Spring hero kickoff"
     assert fake.calls["auto_title"] == 1
 
 
-def test_auto_title_does_not_run_on_subsequent_messages(db_session, server_settings):
-    fake = FakeLLM(title="First title", intent=ChatIntent(type="chat"))
+def test_upgrade_title_does_not_clobber_designer_rename(db_session, server_settings):
+    fake = FakeLLM(title="LLM suggestion", intent=ChatIntent(type="chat"))
     orch = _orch(db_session, server_settings, fake)
     conv = orch.create()
+    orch.post_message(conv.conversation_id, "hello world from the designer", None, [])
+    # Designer renames manually before the background task fires.
+    conv.title = "My custom name"
+    db_session.commit()
 
-    orch.post_message(conv.conversation_id, "first", None, [])
-    fake.title = "Second title (should NOT apply)"
-    orch.post_message(conv.conversation_id, "second", None, [])
-
-    db_session.refresh(conv)
-    assert conv.title == "First title"
-    assert fake.calls["auto_title"] == 1
-
-
-def test_auto_title_skipped_when_conversation_was_renamed(db_session, server_settings):
-    fake = FakeLLM(title="LLM suggested", intent=ChatIntent(type="chat"))
-    orch = _orch(db_session, server_settings, fake)
-    conv = orch.create("Designer named it")  # explicit non-default title
-
-    orch.post_message(conv.conversation_id, "hello", None, [])
+    orch.upgrade_title_from_seed(conv.conversation_id, "hello world from the designer")
 
     db_session.refresh(conv)
-    assert conv.title == "Designer named it"
-    assert fake.calls["auto_title"] == 0
+    assert conv.title == "My custom name"
+    # The LLM may or may not have been called depending on the safety check;
+    # what matters is the designer's rename survived.
 
 
-def test_auto_title_falls_back_to_first_words_when_llm_returns_none(
-    db_session, server_settings
-):
-    """If the small local model can't produce a title, we still avoid 'Untitled'."""
-
+def test_upgrade_title_silently_skips_when_llm_returns_none(db_session, server_settings):
     fake = FakeLLM(title=None, intent=ChatIntent(type="chat"))
     orch = _orch(db_session, server_settings, fake)
     conv = orch.create()
-    orch.post_message(
-        conv.conversation_id, "I want a Christmas card with snow", None, []
-    )
+    orch.post_message(conv.conversation_id, "I want a Christmas card with snow", None, [])
+
+    orch.upgrade_title_from_seed(conv.conversation_id, "I want a Christmas card with snow")
+
     db_session.refresh(conv)
-    assert conv.title == "I want a Christmas card"
+    assert conv.title == "I want a Christmas card"  # heuristic survives
 
 
 # ---------- chat intent ----------

@@ -15,7 +15,7 @@ the chat history is the source of truth for the UI.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
@@ -126,6 +126,28 @@ class ConversationOrchestrator:
             tasks=self._tasks(conv.conversation_id),
         )
 
+    def upgrade_title_from_seed(self, conversation_id: str, seed_text: str) -> None:
+        """Ask the LLM for a better title and apply it, conservatively.
+
+        Called from a FastAPI BackgroundTask so the heavy Ollama call does
+        not block the POST /messages response. Only overwrites the title if
+        the current value is still the heuristic (or 'Untitled') — never
+        clobbers a designer-renamed conversation.
+        """
+
+        conv = self.db.get(Conversation, conversation_id)
+        if conv is None or not seed_text.strip():
+            return
+        heuristic = " ".join(seed_text.split()[:5])[:80] or "Untitled"
+        # Don't overwrite a title the designer renamed by hand.
+        if conv.title.strip().lower() != "untitled" and conv.title != heuristic:
+            return
+        new_title = self.llm.auto_title(seed_text)
+        if not new_title or new_title.strip().lower() == conv.title.strip().lower():
+            return
+        conv.title = new_title[:80]
+        self.db.commit()
+
     def hide(self, conversation_id: str) -> None:
         conv = self._require(conversation_id)
         conv.hidden_at = utc_now()
@@ -151,6 +173,8 @@ class ConversationOrchestrator:
         text: str,
         action: dict[str, Any] | None,
         attachments: list[tuple[bytes, str, str]],
+        *,
+        schedule_auto_title: Callable[[str, str], None] | None = None,
     ) -> tuple[Message, Message | None]:
         """Route a single user turn. Returns (user_message, agent_message).
 
@@ -194,13 +218,15 @@ class ConversationOrchestrator:
             agent_msg = self._agent(conv, f"Something went wrong: {exc}")
 
         if is_first_turn and (text or "").strip() and conv.title.strip().lower() == "untitled":
-            new_title = self.llm.auto_title(text or "")
-            if not new_title:
-                # Heuristic fallback so the sidebar never reads "Untitled"
-                # after the designer has clearly described something.
-                new_title = " ".join((text or "").split()[:5])[:60]
-            if new_title:
-                conv.title = new_title[:80]
+            # Synchronous heuristic so the sidebar gets *something* readable
+            # immediately. The LLM auto_title call (3-10 s with gemma3n:e2b)
+            # is scheduled as a background task by the API endpoint and
+            # upgrades the title once it lands — the UI sidebar poll picks
+            # up the change without blocking the user's send.
+            heuristic = " ".join((text or "").split()[:5])[:80] or "Untitled"
+            conv.title = heuristic
+            if schedule_auto_title is not None:
+                schedule_auto_title(conv.conversation_id, text or "")
 
         conv.updated_at = utc_now()
         self.db.commit()

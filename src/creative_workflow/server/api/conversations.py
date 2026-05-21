@@ -7,8 +7,10 @@ browser doesn't have to do anything beyond drag-and-drop.
 
 import json
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
+
+from creative_workflow.server.db.session import make_session_factory
 
 from creative_workflow.server.api.deps import get_settings
 from creative_workflow.server.config import ServerSettings
@@ -111,9 +113,25 @@ def restore_conversation(
     return {"accepted": True}
 
 
+def _upgrade_title_background(conversation_id: str, seed_text: str, settings: ServerSettings) -> None:
+    """Background-task entry point. Opens its own DB session because
+    BackgroundTasks run after the request's session has been closed."""
+
+    factory = make_session_factory(settings.database_url)
+    with factory() as db:
+        try:
+            ConversationOrchestrator(db, settings).upgrade_title_from_seed(
+                conversation_id, seed_text
+            )
+        except Exception:
+            # Background work is best-effort; never crash the worker thread.
+            pass
+
+
 @router.post("/{conversation_id}/messages", response_model=PostMessageResponse)
 async def post_message(
     conversation_id: str,
+    background_tasks: BackgroundTasks,
     text: str = Form(default=""),
     action: str | None = Form(default=None),
     attachments: list[UploadFile] = File(default=[]),
@@ -150,9 +168,17 @@ async def post_message(
         )
 
     orch = _orch(db, settings)
+
+    def _schedule(conv_id: str, seed: str) -> None:
+        background_tasks.add_task(_upgrade_title_background, conv_id, seed, settings)
+
     try:
         user_msg, agent_msg = orch.post_message(
-            conversation_id, text, parsed_action, files
+            conversation_id,
+            text,
+            parsed_action,
+            files,
+            schedule_auto_title=_schedule,
         )
     except OrchestratorError as exc:
         raise HTTPException(
