@@ -21,7 +21,15 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from creative_workflow.server.config import ServerSettings
-from creative_workflow.server.db.models import Asset, Conversation, Message, Review, Run, Task
+from creative_workflow.server.db.models import (
+    Asset,
+    Conversation,
+    Message,
+    Review,
+    Run,
+    Task,
+    WorkflowEvent,
+)
 from creative_workflow.server.services.artifacts import ArtifactService, sha256_bytes
 from creative_workflow.server.services.local_llm import LocalLLMService
 from creative_workflow.server.services.workflow import WorkflowService
@@ -584,13 +592,38 @@ class ConversationOrchestrator:
             .where(Task.conversation_id == conversation_id)
             .order_by(desc(Task.created_at))
         ).all()
-        return [
-            {
-                "task_id": t.task_id,
-                "workflow_state": t.workflow_state,
-                "title": t.title,
-                "requested_output_type": t.requested_output_type,
-                "created_at": t.created_at.isoformat(),
-            }
-            for t in rows
-        ]
+        result: list[dict[str, Any]] = []
+        for t in rows:
+            # Surface the most recent worker job_progress event per task so
+            # the chat bubble can show what the worker is doing right now,
+            # not just the coarse workflow_state.
+            latest_progress_event = self.db.scalars(
+                select(WorkflowEvent)
+                .where(
+                    WorkflowEvent.task_id == t.task_id,
+                    WorkflowEvent.event_type == "job_progress",
+                )
+                .order_by(desc(WorkflowEvent.created_at))
+                .limit(1)
+            ).first()
+            latest_progress: dict[str, Any] | None = None
+            if latest_progress_event is not None:
+                payload = latest_progress_event.payload_json or {}
+                latest_progress = {
+                    "step": payload.get("step"),
+                    "message": payload.get("message"),
+                    "state": payload.get("state"),
+                    "at": latest_progress_event.created_at.isoformat(),
+                    "job_id": latest_progress_event.job_id,
+                }
+            result.append(
+                {
+                    "task_id": t.task_id,
+                    "workflow_state": t.workflow_state,
+                    "title": t.title,
+                    "requested_output_type": t.requested_output_type,
+                    "created_at": t.created_at.isoformat(),
+                    "latest_progress": latest_progress,
+                }
+            )
+        return result

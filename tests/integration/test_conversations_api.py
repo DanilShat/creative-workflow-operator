@@ -296,6 +296,46 @@ def test_posting_to_a_hidden_conversation_is_rejected(tmp_path, server_settings)
 # ---------------- helpers ----------------
 
 
+def test_conversation_detail_exposes_latest_progress_per_task(tmp_path, server_settings):
+    """Frontend needs the latest job_progress event per task so the chat
+    bubble can show what the worker is currently doing."""
+
+    from creative_workflow.server.db.models import WorkflowEvent
+    from creative_workflow.shared.ids import new_id
+
+    client, factory = _client(tmp_path, server_settings, "progress.db")
+    cid = client.post("/api/v1/conversations", json={"title": "p"}).json()["conversation_id"]
+
+    with factory() as db:
+        db.add(
+            Task(
+                task_id="task_progress",
+                conversation_id=cid,
+                title="x",
+                brief_text="b",
+                requested_output_type="static_image",
+                workflow_state="running_worker_job",
+                created_by="chat",
+            )
+        )
+        db.add(
+            WorkflowEvent(
+                event_id=new_id("event"),
+                task_id="task_progress",
+                event_type="job_progress",
+                payload_json={"step": "execute_flow", "message": "Filling Gemini composer", "state": "executing"},
+            )
+        )
+        db.commit()
+
+    detail = client.get(f"/api/v1/conversations/{cid}").json()
+    assert len(detail["tasks"]) == 1
+    progress = detail["tasks"][0]["latest_progress"]
+    assert progress is not None
+    assert progress["step"] == "execute_flow"
+    assert progress["message"] == "Filling Gemini composer"
+
+
 def test_variant_count_heuristic():
     assert _parse_variant_count("") == 1
     assert _parse_variant_count("hi") == 1

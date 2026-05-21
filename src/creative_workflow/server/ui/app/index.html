@@ -631,8 +631,16 @@ function renderBubble(m, taskById, latestAgentMsgByTask) {
       } else if (task.workflow_state === "failed") {
         appendFailurePanel(bubble, m);
       } else if (ACTIVE_STATES.includes(task.workflow_state)) {
+        // Show whatever the worker's most recent /progress event said —
+        // 'Filling Gemini composer…', 'Downloading variants…', etc.
+        // Falls back to a neutral pulse when the operator hasn't posted
+        // anything yet.
+        const prog = task.latest_progress || {};
+        const liveText = (prog.message && prog.message.trim())
+          || (prog.step && prog.step.replace(/_/g, " "))
+          || "still working…";
         bubble.append(h("div", { class: "bubble-status" },
-          h("span", { class: "pulse" }), "still working…"));
+          h("span", { class: "pulse" }), liveText));
       }
     }
   }
