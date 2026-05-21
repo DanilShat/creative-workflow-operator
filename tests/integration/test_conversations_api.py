@@ -251,6 +251,78 @@ def test_select_packshot_rejects_image_from_another_task(tmp_path, server_settin
     assert r.status_code == 409
 
 
+def test_decline_image_request_parks_task_and_replies_via_chat(
+    tmp_path, server_settings
+):
+    """Designer clicks 'Not an image request' — Gate A is NOT started, the
+    DRAFT task is parked, and the agent posts a chat reply for the original
+    text instead."""
+
+    client, factory = _client(tmp_path, server_settings)
+    cid = client.post("/api/v1/conversations", json={"title": "h"}).json()["conversation_id"]
+
+    first = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={"text": "what's in this image?"},
+        files=[("attachments", ("ref.png", io.BytesIO(PNG_BYTES), "image/png"))],
+    ).json()
+    task_id = first["user_message"]["related_task_id"]
+
+    r = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={
+            "action": json.dumps(
+                {"type": "decline_image_request", "task_id": task_id}
+            )
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["agent_message"]  # some reply, even if Ollama is the fallback
+
+    with factory() as db:
+        task = db.query(Task).filter(Task.task_id == task_id).first()
+        assert task.workflow_state == "agent_replied"
+        jobs = db.query(Job).filter(Job.task_id == task_id).all()
+        assert jobs == []  # Gate A was NOT started
+
+
+def test_decline_image_request_for_non_draft_task_is_rejected(
+    tmp_path, server_settings
+):
+    """Cannot decline after select_packshot has already started Gate A."""
+
+    client, factory = _client(tmp_path, server_settings)
+    cid = client.post("/api/v1/conversations", json={"title": "h"}).json()["conversation_id"]
+
+    first = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={"text": "Make a hero."},
+        files=[("attachments", ("ref.png", io.BytesIO(PNG_BYTES), "image/png"))],
+    ).json()
+    task_id = first["user_message"]["related_task_id"]
+
+    # Confirm packshot first to leave DRAFT
+    client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={
+            "action": json.dumps(
+                {"type": "select_packshot", "task_id": task_id, "selected_asset_id": None}
+            )
+        },
+    )
+
+    r = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={
+            "action": json.dumps(
+                {"type": "decline_image_request", "task_id": task_id}
+            )
+        },
+    )
+    assert r.status_code == 409
+
+
 def test_select_packshot_after_already_chosen_is_rejected(tmp_path, server_settings):
     """Cannot select packshot twice — the second click is a conflict."""
 

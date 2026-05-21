@@ -735,7 +735,14 @@ function appendPackshotChoices(bubble, agentMsg) {
       class: "b-btn approve",
       disabled: current === undefined ? "disabled" : null,
       onclick: () => confirmPackshot(taskId),
-    }, "✓  Confirm"));
+    }, "✓  Confirm"),
+    // Escape hatch: if this isn't actually an image-generation request,
+    // skip Gate A and route through chat_text via Ollama instead.
+    h("button", {
+      class: "b-btn",
+      title: "Skip Gate A — answer this as plain chat instead",
+      onclick: () => declineImageRequest(taskId),
+    }, "Not an image request"));
   bubble.append(actions);
 }
 
@@ -965,6 +972,28 @@ async function approveRun(runId) {
     await loadList();
   } catch (e) { toast(e.message, "err"); }
   finally { app.sending = false; render(); }
+}
+
+async function declineImageRequest(taskId) {
+  if (app.sending) return;
+  app.sending = true; render();
+  try {
+    await API.postForm(
+      "/conversations/" + app.activeId + "/messages",
+      _formWithAction(
+        { type: "decline_image_request", task_id: taskId },
+        "(not an image request)",
+      ),
+    );
+    delete app.packshotByTask[taskId];
+    await loadConversation(app.activeId);
+    await loadList();
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    app.sending = false;
+    render();
+  }
 }
 
 async function confirmPackshot(taskId) {

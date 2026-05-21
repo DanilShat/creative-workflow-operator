@@ -105,22 +105,24 @@ class WorkflowService:
         # constructing dependent jobs so PostgreSQL can enforce the contract
         # without relying on ORM relationship ordering.
         self.db.flush()
-        normalized = self.llm.normalize_brief(task.brief_text)
-        route = self.llm.route_for_gate_a(normalized)
+        # Gate A's route is hardcoded: every run starts with Gemini and the
+        # Freepik job is created on Gemini completion. The earlier
+        # normalize_brief / route_for_gate_a Ollama calls always returned
+        # exactly this routing (and their fallback paths returned the same),
+        # so they were 6-20 s of latency for no behavior change. Removed.
+        route_reason = "Gate A starts by building a generation prompt in Gemini."
         if source_asset_id is WorkflowService._AUTO_PACKSHOT:
             source_asset_id = references[0].asset_id if references else None
         # source_asset_id is now an explicit value (asset_id or None).
         jobs = [
-            self._make_gemini_job(task, run, references, operator_note, route.reason, source_asset_id)
+            self._make_gemini_job(task, run, references, operator_note, route_reason, source_asset_id)
             for _ in range(variant_count)
         ]
         task.workflow_state = WorkflowState.WAITING_WORKER.value
         self._event(task_id, run.run_id, jobs[0].job_id, "gate_a_started", {
-            "normalized_brief": normalized.model_dump(),
-            "route": route.model_dump(),
             "variant_count": variant_count,
             "created_job_ids": [j.job_id for j in jobs],
-            "llm_orchestration": self.llm.orchestration_meta(),
+            "route_reason": route_reason,
         })
         self.db.commit()
         return run, jobs

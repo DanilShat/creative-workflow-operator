@@ -215,10 +215,13 @@ class ConversationOrchestrator:
         self, conv: Conversation, action: dict[str, Any], user_msg: Message
     ) -> Message:
         kind = action.get("type")
-        # select_packshot is its own thing: it targets a DRAFT task that has
-        # no run yet, so it can't go through the run-id lookup below.
+        # select_packshot and decline_image_request both target a DRAFT
+        # task that has no run yet, so neither can go through the run-id
+        # lookup below.
         if kind == "select_packshot":
             return self._handle_select_packshot(conv, action, user_msg)
+        if kind == "decline_image_request":
+            return self._handle_decline_image_request(conv, action, user_msg)
         run_id = action.get("run_id")
         task = self._task_for_run(conv, run_id)
         user_msg.related_task_id = task.task_id
@@ -272,25 +275,21 @@ class ConversationOrchestrator:
 
         Gate A is NOT started here — that happens once the designer answers
         the clarification (or replies 'None'). The task sits in DRAFT with
-        its references attached until then.
+        its references attached until then. If the request actually wasn't
+        a Gate A request, the packshot bubble offers a 'Not an image
+        request' escape hatch that routes through chat_text via Ollama.
         """
 
-        # Default to the phase-2 heuristic. If the LLM is up and confidently
-        # classifies this as a Gate A request, use its richer extraction.
+        # Image + text = Gate A by default. We used to ask Ollama
+        # classify_chat_intent to confirm, but that was 3-10 s of latency
+        # for a near-deterministic outcome; the LLM-extracted brief / title
+        # are now handled later (the brief is the user's text verbatim;
+        # the title comes from auto_title in post_message). The 'Not an
+        # image request' button on the clarification bubble lets the
+        # designer reroute the rare exceptions.
         title = _derive_title_from_message(text)
         brief = text.strip() or "(image-only brief)"
         output_type = _infer_output_type(text)
-        if text.strip():
-            intent = self.llm.classify_chat_intent(
-                text, context_line="image attached — likely Gate A"
-            )
-            if intent is not None and intent.type == "gate_a":
-                if intent.title and intent.title.strip():
-                    title = intent.title.strip()[:80]
-                if intent.brief and intent.brief.strip():
-                    brief = intent.brief.strip()
-                if intent.output_type:
-                    output_type = intent.output_type
 
         task = self.workflow.create_task(
             title=title,
@@ -341,6 +340,46 @@ class ConversationOrchestrator:
         )
         self.db.add(agent_msg)
         return agent_msg
+
+    def _handle_decline_image_request(
+        self, conv: Conversation, action: dict[str, Any], user_msg: Message
+    ) -> Message:
+        """Designer answered 'Not an image request' on the packshot bubble.
+
+        The staged DRAFT task gets parked in `agent_replied` state (no run
+        will be created against it), and the original message text is sent
+        through chat_text so Ollama produces a normal conversational reply.
+        """
+
+        task_id = action.get("task_id")
+        if not task_id:
+            raise OrchestratorError("decline_image_request needs a task_id")
+        task = self.db.get(Task, task_id)
+        if task is None or task.conversation_id != conv.conversation_id:
+            raise OrchestratorError("task not found in this conversation")
+        if task.workflow_state != "draft":
+            raise OrchestratorError("can only decline a DRAFT task")
+
+        # Recover the brief text from the original user message so the LLM
+        # has something to reply to. Falls back to a friendly stub if the
+        # message has been mutated.
+        original = self.db.scalars(
+            select(Message)
+            .where(Message.related_task_id == task_id, Message.role == "user")
+            .order_by(Message.created_at)
+            .limit(1)
+        ).first()
+        text = (original.content if original else "").strip() or "(no text)"
+
+        task.workflow_state = "agent_replied"
+        user_msg.related_task_id = task.task_id
+
+        reply = self.llm.chat_text(text)
+        return self._agent(
+            conv,
+            reply,
+            related_task_id=task.task_id,
+        )
 
     def _handle_select_packshot(
         self, conv: Conversation, action: dict[str, Any], user_msg: Message
