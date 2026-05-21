@@ -95,6 +95,9 @@ class FailureType(StrEnum):
     AFTEREFFECTS_NOT_CONNECTED = "aftereffects_not_connected"
     INVALID_JOB_PAYLOAD = "invalid_job_payload"
     UNSUPPORTED_ACTION_NAME = "unsupported_action_name"
+    # Claude Code CLI exited with subtype=error_max_turns. Mirror of the
+    # worker-side enum so JobFailRequest accepts the new failure type.
+    MAX_TURNS_EXHAUSTED = "max_turns_exhausted"
     FATAL_UNEXPECTED = "fatal_unexpected"
 
 

@@ -33,7 +33,11 @@ class ServerSettings:
     ollama_model: str
     heartbeat_interval_s: int = 15
     claim_poll_interval_s: int = 3
-    active_job_lease_ttl_s: int = 90
+    # Active jobs hold a lease that the worker's heartbeats renew. If the
+    # operator gets briefly overloaded by an LLM call and a few heartbeats
+    # time out, a too-tight TTL can orphan a job that is still running. 5
+    # minutes is comfortable for a Gemini / Freepik browser step.
+    active_job_lease_ttl_s: int = 300
     default_browser_timeout_s: int = 1200
     # How often the server sweeps expired job leases back to ORPHANED so a
     # stranded job self-heals and the worker is freed without manual action.
@@ -49,6 +53,15 @@ class ServerSettings:
             for item in os.getenv("TRUSTED_WORKER_IDS", "designer-laptop-01").split(",")
             if item.strip()
         }
+        def _int_env(name: str, fallback: int) -> int:
+            raw = os.getenv(name)
+            if not raw:
+                return fallback
+            try:
+                return int(raw)
+            except ValueError:
+                return fallback
+
         return cls(
             database_url=os.getenv(
                 "DATABASE_URL",
@@ -62,6 +75,13 @@ class ServerSettings:
             trusted_worker_ids=trusted,
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
             ollama_model=os.getenv("OLLAMA_MODEL", "gemma3n:e2b"),
+            # Operator can tune lease/heartbeat/poll timings via .env.server
+            # without editing the dataclass defaults.
+            heartbeat_interval_s=_int_env("HEARTBEAT_INTERVAL_S", 15),
+            claim_poll_interval_s=_int_env("CLAIM_POLL_INTERVAL_S", 3),
+            active_job_lease_ttl_s=_int_env("ACTIVE_JOB_LEASE_TTL_S", 300),
+            default_browser_timeout_s=_int_env("DEFAULT_BROWSER_TIMEOUT_S", 1200),
+            orphan_sweep_interval_s=_int_env("ORPHAN_SWEEP_INTERVAL_S", 30),
         )
 
     def validate(self) -> list[str]:
