@@ -118,9 +118,12 @@ def test_empty_message_is_rejected(tmp_path, server_settings):
     assert r.status_code == 409
 
 
-def test_image_attachment_creates_gate_a_run_with_parsed_variant_count(
+def test_image_attachment_creates_draft_task_and_asks_for_packshot(
     tmp_path, server_settings
 ):
+    """A new chat with images stages a DRAFT task and an agent
+    clarification bubble — Gate A only kicks off after select_packshot."""
+
     client, factory = _client(tmp_path, server_settings)
     cid = client.post("/api/v1/conversations", json={"title": "hero"}).json()["conversation_id"]
 
@@ -136,22 +139,151 @@ def test_image_attachment_creates_gate_a_run_with_parsed_variant_count(
     agent_msg = body["agent_message"]
     assert len(user_msg["attachments"]) == 1
     assert user_msg["related_task_id"]
-    assert user_msg["related_run_id"]
-    assert "3 variant" in agent_msg["content"]
+    # No run yet — Gate A waits for the packshot answer.
+    assert user_msg["related_run_id"] is None
+    # Agent's clarification bubble carries the refs as attachments so the
+    # UI can render them as image-buttons.
+    assert agent_msg["attachments"] == user_msg["attachments"]
+    assert "packshot" in agent_msg["content"].lower()
 
     with factory() as db:
         tasks = db.query(Task).filter(Task.conversation_id == cid).all()
         assert len(tasks) == 1
         task = tasks[0]
-        assert task.workflow_state == "waiting_worker"
+        assert task.workflow_state == "draft"
         jobs = db.query(Job).filter(Job.task_id == task.task_id).all()
-        assert len(jobs) == 3  # one Gemini job per variant; Freepik comes later
-        assert all(j.required_capability == "browser.gemini" for j in jobs)
+        assert jobs == []  # no run started yet
 
-    detail = client.get(f"/api/v1/conversations/{cid}").json()
-    assert len(detail["messages"]) == 2  # user + agent
-    assert len(detail["tasks"]) == 1
-    assert detail["tasks"][0]["workflow_state"] == "waiting_worker"
+
+def test_select_packshot_starts_gate_a_with_chosen_packshot(
+    tmp_path, server_settings
+):
+    """After the clarification, selecting an image starts Gate A with it
+    as the packshot anchor; the resulting Gemini job inputs reflect that."""
+
+    client, factory = _client(tmp_path, server_settings)
+    cid = client.post("/api/v1/conversations", json={"title": "h"}).json()["conversation_id"]
+
+    first = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={"text": "Make 3 variants of a bright hero."},
+        files=[("attachments", ("ref.png", io.BytesIO(PNG_BYTES), "image/png"))],
+    ).json()
+    asset_id = first["user_message"]["attachments"][0]
+    task_id = first["user_message"]["related_task_id"]
+
+    answer = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={
+            "action": json.dumps(
+                {"type": "select_packshot", "task_id": task_id, "selected_asset_id": asset_id}
+            ),
+            "text": "(packshot chosen)",
+        },
+    )
+    assert answer.status_code == 200, answer.text
+    follow_up = answer.json()["agent_message"]
+    assert "starting gate a" in follow_up["content"].lower()
+    assert "3 variant" in follow_up["content"]
+
+    with factory() as db:
+        task = db.query(Task).filter(Task.task_id == task_id).first()
+        assert task.workflow_state == "waiting_worker"
+        jobs = db.query(Job).filter(Job.task_id == task_id).all()
+        assert len(jobs) == 3  # one Gemini job per variant
+        # All Gemini jobs must carry the chosen packshot
+        for j in jobs:
+            assert j.inputs_json.get("source_asset_id") == asset_id
+
+
+def test_select_packshot_none_starts_gate_a_without_anchor(
+    tmp_path, server_settings
+):
+    """Designer picks 'None' — Gate A starts but with no packshot anchor."""
+
+    client, factory = _client(tmp_path, server_settings)
+    cid = client.post("/api/v1/conversations", json={"title": "h"}).json()["conversation_id"]
+
+    first = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={"text": "Style references only."},
+        files=[("attachments", ("ref.png", io.BytesIO(PNG_BYTES), "image/png"))],
+    ).json()
+    task_id = first["user_message"]["related_task_id"]
+
+    answer = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={
+            "action": json.dumps(
+                {"type": "select_packshot", "task_id": task_id, "selected_asset_id": None}
+            )
+        },
+    )
+    assert answer.status_code == 200
+    assert "no packshot" in answer.json()["agent_message"]["content"].lower()
+    with factory() as db:
+        jobs = db.query(Job).filter(Job.task_id == task_id).all()
+        for j in jobs:
+            assert j.inputs_json.get("source_asset_id") is None
+
+
+def test_select_packshot_rejects_image_from_another_task(tmp_path, server_settings):
+    """A select_packshot whose asset_id doesn't belong to the task is rejected."""
+
+    client, factory = _client(tmp_path, server_settings)
+    cid = client.post("/api/v1/conversations", json={"title": "h"}).json()["conversation_id"]
+
+    first = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={"text": "Make a hero."},
+        files=[("attachments", ("ref.png", io.BytesIO(PNG_BYTES), "image/png"))],
+    ).json()
+    task_id = first["user_message"]["related_task_id"]
+
+    r = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={
+            "action": json.dumps(
+                {"type": "select_packshot", "task_id": task_id, "selected_asset_id": "asset_bogus"}
+            )
+        },
+    )
+    assert r.status_code == 409
+
+
+def test_select_packshot_after_already_chosen_is_rejected(tmp_path, server_settings):
+    """Cannot select packshot twice — the second click is a conflict."""
+
+    client, factory = _client(tmp_path, server_settings)
+    cid = client.post("/api/v1/conversations", json={"title": "h"}).json()["conversation_id"]
+
+    first = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={"text": "Make a hero."},
+        files=[("attachments", ("ref.png", io.BytesIO(PNG_BYTES), "image/png"))],
+    ).json()
+    asset_id = first["user_message"]["attachments"][0]
+    task_id = first["user_message"]["related_task_id"]
+
+    ok = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={
+            "action": json.dumps(
+                {"type": "select_packshot", "task_id": task_id, "selected_asset_id": asset_id}
+            )
+        },
+    )
+    assert ok.status_code == 200
+
+    second = client.post(
+        f"/api/v1/conversations/{cid}/messages",
+        data={
+            "action": json.dumps(
+                {"type": "select_packshot", "task_id": task_id, "selected_asset_id": None}
+            )
+        },
+    )
+    assert second.status_code == 409
 
 
 def test_approve_action_records_review_and_advances_task_state(

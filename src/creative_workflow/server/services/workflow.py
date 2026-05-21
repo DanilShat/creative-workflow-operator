@@ -5,6 +5,8 @@ creates the Freepik job, Freepik completion moves the task to human review, and
 human rejection creates a fresh retry run instead of holding a worker lease.
 """
 
+from typing import ClassVar
+
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
@@ -78,11 +80,19 @@ class WorkflowService:
         self.db.refresh(task)
         return task
 
+    # Sentinel used to distinguish "caller didn't specify a packshot" (legacy
+    # behavior: auto-pick the first reference) from "caller explicitly says
+    # there is no packshot" (passes None). Chat clarification uses the
+    # explicit form; the older /tasks/{id}/start-gate-a endpoint defaults
+    # to the legacy auto-pick.
+    _AUTO_PACKSHOT: ClassVar[object] = object()
+
     def start_gate_a(
         self,
         task_id: str,
         operator_note: str | None,
         variant_count: int = 1,
+        source_asset_id: str | None | object = _AUTO_PACKSHOT,
     ) -> tuple[Run, list[Job]]:
         task = self._task(task_id)
         references = self._reference_assets(task_id)
@@ -97,7 +107,9 @@ class WorkflowService:
         self.db.flush()
         normalized = self.llm.normalize_brief(task.brief_text)
         route = self.llm.route_for_gate_a(normalized)
-        source_asset_id = references[0].asset_id if references else None
+        if source_asset_id is WorkflowService._AUTO_PACKSHOT:
+            source_asset_id = references[0].asset_id if references else None
+        # source_asset_id is now an explicit value (asset_id or None).
         jobs = [
             self._make_gemini_job(task, run, references, operator_note, route.reason, source_asset_id)
             for _ in range(variant_count)

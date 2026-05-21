@@ -168,6 +168,7 @@ button { font-family: inherit; cursor: pointer; }
 .b-btn.approve:hover { filter: brightness(1.08); }
 .b-btn.reject { color: var(--red); border-color: rgba(224,89,79,.45); background: transparent; }
 .b-btn.reject:hover { background: rgba(224,89,79,.12); }
+.b-btn.sel { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
 
 .bubble-status { margin-top: 8px; font-size: 11.5px; color: var(--text-faint);
   display: flex; align-items: center; gap: 6px; }
@@ -388,6 +389,9 @@ const app = {
   sending: false,
   lightbox: null,        // asset_id of currently-lightboxed image
   selectedByRun: {},     // run_id -> asset_id chosen by the designer, preserved across polls
+  // Packshot clarification choice per task. Values: undefined (no pick),
+  // asset_id (one of the refs), or null (designer chose "None").
+  packshotByTask: {},
 };
 let pollTimer = null;
 function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
@@ -626,7 +630,10 @@ function renderBubble(m, taskById, latestAgentMsgByTask) {
   if (m.role === "agent" && m.related_task_id && latestAgentMsgByTask[m.related_task_id] === m.message_id) {
     const task = taskById[m.related_task_id];
     if (task) {
-      if (task.workflow_state === "waiting_human_review") {
+      if (task.workflow_state === "draft" && m.attachments && m.attachments.length) {
+        // Packshot clarification: pick one of the refs (or None) before Gate A starts.
+        appendPackshotChoices(bubble, m);
+      } else if (task.workflow_state === "waiting_human_review") {
         appendReviewPanel(bubble, m);
       } else if (task.workflow_state === "failed") {
         appendFailurePanel(bubble, m);
@@ -697,6 +704,41 @@ function appendReviewPanel(bubble, agentMsg) {
   }
 }
 
+function appendPackshotChoices(bubble, agentMsg) {
+  const taskId = agentMsg.related_task_id;
+  const assetIds = agentMsg.attachments || [];
+  if (!assetIds.length) return;
+
+  const current = app.packshotByTask[taskId];  // undefined | null | asset_id
+  const grid = h("div", { class: "bubble-images" });
+  for (const aid of assetIds) {
+    const img = h("img", {
+      src: assetUrl(aid), alt: "",
+      class: current === aid ? "sel" : "",
+      title: "Pick this as the product packshot",
+    });
+    img.addEventListener("click", () => {
+      app.packshotByTask[taskId] = aid;
+      render();
+    });
+    grid.append(img);
+  }
+  bubble.append(grid);
+
+  const noneSel = current === null;
+  const actions = h("div", { class: "bubble-actions" },
+    h("button", {
+      class: "b-btn" + (noneSel ? " sel" : ""),
+      onclick: () => { app.packshotByTask[taskId] = null; render(); },
+    }, "None (style refs only)"),
+    h("button", {
+      class: "b-btn approve",
+      disabled: current === undefined ? "disabled" : null,
+      onclick: () => confirmPackshot(taskId),
+    }, "✓  Confirm"));
+  bubble.append(actions);
+}
+
 function appendFailurePanel(bubble, agentMsg) {
   // the orchestrator's agent message already explained the failure; here we
   // just offer the designer an explicit retry-by-message hint.
@@ -756,6 +798,28 @@ function renderComposer() {
     },
     onkeydown: e => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    },
+    // Ctrl+V on an image (a screenshot, or a copy from anywhere) turns it
+    // straight into an attachment instead of forcing the designer through
+    // a file picker. Pasted text falls through to normal textarea behavior.
+    onpaste: e => {
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      const pasted = [];
+      for (const it of items) {
+        if (it.kind === "file" && it.type && it.type.startsWith("image/")) {
+          const blob = it.getAsFile();
+          if (blob) {
+            const ext = (it.type.split("/")[1] || "png").replace(/[^a-z0-9]/gi, "") || "png";
+            const name = `pasted-${Date.now()}-${pasted.length + 1}.${ext}`;
+            pasted.push(new File([blob], name, { type: it.type }));
+          }
+        }
+      }
+      if (pasted.length) {
+        e.preventDefault();
+        app.composer.files = app.composer.files.concat(pasted);
+        render();
+      }
     },
   }, app.composer.text);
 
@@ -901,6 +965,31 @@ async function approveRun(runId) {
     await loadList();
   } catch (e) { toast(e.message, "err"); }
   finally { app.sending = false; render(); }
+}
+
+async function confirmPackshot(taskId) {
+  if (app.sending) return;
+  const chosen = app.packshotByTask[taskId];
+  if (chosen === undefined) { toast("Pick an image or None first.", "err"); return; }
+  app.sending = true; render();
+  try {
+    const label = chosen === null ? "(no packshot)" : "(packshot chosen)";
+    await API.postForm(
+      "/conversations/" + app.activeId + "/messages",
+      _formWithAction(
+        { type: "select_packshot", task_id: taskId, selected_asset_id: chosen },
+        label,
+      ),
+    );
+    delete app.packshotByTask[taskId];
+    await loadConversation(app.activeId);
+    await loadList();
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    app.sending = false;
+    render();
+  }
 }
 
 async function rejectRun(runId, reason) {

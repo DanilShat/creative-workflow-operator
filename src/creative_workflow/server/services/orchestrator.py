@@ -215,6 +215,10 @@ class ConversationOrchestrator:
         self, conv: Conversation, action: dict[str, Any], user_msg: Message
     ) -> Message:
         kind = action.get("type")
+        # select_packshot is its own thing: it targets a DRAFT task that has
+        # no run yet, so it can't go through the run-id lookup below.
+        if kind == "select_packshot":
+            return self._handle_select_packshot(conv, action, user_msg)
         run_id = action.get("run_id")
         task = self._task_for_run(conv, run_id)
         user_msg.related_task_id = task.task_id
@@ -264,6 +268,13 @@ class ConversationOrchestrator:
         text: str,
         attachments: list[tuple[bytes, str, str]],
     ) -> Message:
+        """Create a draft task with the attached refs and ask which is the packshot.
+
+        Gate A is NOT started here — that happens once the designer answers
+        the clarification (or replies 'None'). The task sits in DRAFT with
+        its references attached until then.
+        """
+
         # Default to the phase-2 heuristic. If the LLM is up and confidently
         # classifies this as a Gate A request, use its richer extraction.
         title = _derive_title_from_message(text)
@@ -280,7 +291,6 @@ class ConversationOrchestrator:
                     brief = intent.brief.strip()
                 if intent.output_type:
                     output_type = intent.output_type
-        variant_count = _parse_variant_count(text)
 
         task = self.workflow.create_task(
             title=title,
@@ -302,20 +312,89 @@ class ConversationOrchestrator:
             asset = self.artifacts.store_reference(task.task_id, meta, data)
             asset_ids.append(asset.asset_id)
         user_msg.attachments_json = asset_ids
+        user_msg.related_task_id = task.task_id
+
+        # Always ask — even with a single image — and offer "None" so a pure
+        # style-reference brief can opt out of having a packshot anchor.
+        n = len(asset_ids)
+        if n == 1:
+            question = (
+                "I have your brief and one image. Is this the **product packshot** "
+                "(the actual product I should preserve in every generated image), or "
+                "just a style reference? Pick the image or **None**."
+            )
+        else:
+            question = (
+                f"I have your brief and {n} images. **Which one is the product "
+                "packshot** — the actual product I should preserve in every generated "
+                "image? Pick one, or **None** if they're all just style references."
+            )
+        agent_msg = Message(
+            message_id=new_id("msg"),
+            conversation_id=conv.conversation_id,
+            role="agent",
+            content=question,
+            # The UI keys off attachments_json on an agent bubble + the task
+            # being in DRAFT to render the image-button clarification panel.
+            attachments_json=asset_ids,
+            related_task_id=task.task_id,
+        )
+        self.db.add(agent_msg)
+        return agent_msg
+
+    def _handle_select_packshot(
+        self, conv: Conversation, action: dict[str, Any], user_msg: Message
+    ) -> Message:
+        """Resume Gate A after the designer answered the packshot question."""
+
+        task_id = action.get("task_id")
+        if not task_id:
+            raise OrchestratorError("select_packshot needs a task_id")
+        task = self.db.get(Task, task_id)
+        if task is None or task.conversation_id != conv.conversation_id:
+            raise OrchestratorError("task not found in this conversation")
+        if task.workflow_state != "draft":
+            raise OrchestratorError("packshot already chosen for this task")
+
+        selected = action.get("selected_asset_id")  # None means "no packshot"
+        if selected is not None:
+            ref = self.db.scalar(
+                select(Asset).where(
+                    Asset.asset_id == selected,
+                    Asset.task_id == task.task_id,
+                    Asset.asset_class == AssetClass.REFERENCE.value,
+                )
+            )
+            if ref is None:
+                raise OrchestratorError("selected image is not a reference of this task")
+
+        # Re-derive variant_count from the original user message (we don't
+        # persist it anywhere else, and the parse is deterministic).
+        original = self.db.scalars(
+            select(Message)
+            .where(Message.related_task_id == task_id, Message.role == "user")
+            .order_by(Message.created_at)
+            .limit(1)
+        ).first()
+        variant_count = _parse_variant_count(original.content if original else "")
 
         run, _ = self.workflow.start_gate_a(
-            task.task_id, operator_note=None, variant_count=variant_count
+            task.task_id,
+            operator_note=None,
+            variant_count=variant_count,
+            source_asset_id=selected,
         )
         user_msg.related_task_id = task.task_id
         user_msg.related_run_id = run.run_id
 
-        reply = (
-            f"Got it — starting Gate A "
-            f"({variant_count} variant{'s' if variant_count != 1 else ''}). "
-            "I'll come back when the image is ready to review."
-        )
+        anchor = "no packshot — references are style only" if selected is None else "anchored to the chosen packshot"
+        plural = "s" if variant_count != 1 else ""
         return self._agent(
-            conv, reply, related_task_id=task.task_id, related_run_id=run.run_id
+            conv,
+            f"Got it — starting Gate A ({anchor}, {variant_count} variant{plural}). "
+            "I'll come back when the image is ready to review.",
+            related_task_id=task.task_id,
+            related_run_id=run.run_id,
         )
 
     def _handle_text_intent(
